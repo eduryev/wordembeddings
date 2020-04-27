@@ -8,8 +8,8 @@ import numpy as np
 import tensorflow as tf
 # from tensorflow.python.lib.io import file_io
 
-from . import model
-from . import util
+import newmodel.model as model #from . import model
+import newmodel.util as util #from . import util
 
 
 
@@ -81,8 +81,8 @@ def get_args():
         default = 0.75)
     parser.add_argument(
         '--threshold',
-        type=float,
-        default = 100.)
+        type=int,
+        default = 100)
 
     args, _ = parser.parse_known_args()
     return args
@@ -105,13 +105,13 @@ def train_model(args):
     unigram = arr_counts/arr_counts.sum()
     dataset = util.create_dataset_from_stored_batch_sizees(train_file_path, args.batch_size, args.stored_batch_size, args.neg_samples, unigram, args.threshold, args.po)
 
-    for batch in dataset.take(1):
-        print(batch[0]['target'].shape, batch[1].shape)
+    # for batch in dataset.take(1):
+    #    print(batch[0]['target'].shape, batch[1].shape)
 
-    return
+    
     # create the model
     w2v_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples)
-    w2v_model.compile(loss = Word2VecNEGLoss(), optimizer = w2v_model.optimizer)
+    w2v_model.compile(loss = model.Word2VecNEGLoss(), optimizer = w2v_model.optimizer)
 
     # train the model
     # TODO: checkpoints

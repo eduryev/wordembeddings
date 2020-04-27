@@ -1,7 +1,7 @@
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Dot, Embedding, Input, Reshape
+from tensorflow.keras.layers import Dot, Embedding, Input, Reshape, concatenate
 
 
 class Word2VecNEGLoss(tf.keras.losses.Loss):
