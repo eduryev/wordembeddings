@@ -359,19 +359,23 @@ def load_process_data(file_name, args):
 #                                     p = sampling_distribution).reshape(100, stored_batch_size, neg_samples)
 #
 
-def create_dataset_from_stored_batch_sizees(file_path, batch_size, stored_batch_size, neg_samples, sampling_distribution, threshold, po):
+def create_dataset_from_stored_batches(file_path, batch_size, stored_batch_size, neg_samples, sampling_distribution, threshold, po):
     def data_generator(data_memmap):
         return iter(data_memmap)
 
     if file_path[:5] == 'gs://':
         file_path = download_from_gs(file_path) 
     numpy_data_memmap = np.load(file_path, mmap_mode='r')
+    #print(f'My shape is {np.load(file_path).shape}') 
+    
 
     pos_dataset = tf.data.Dataset.from_generator(
         generator=data_generator,
         args = [numpy_data_memmap],
         output_types=np.int32,
         output_shapes=(stored_batch_size, 3)).unbatch().batch(batch_size)
+
+    pos_dataset = tf.data.Dataset.from_tensor_slices(np.load(file_path)).unbatch().batch(batch_size)
 
     # TODO: add hyperparameter for the number of stored_batch_sizees generated
     period = 32

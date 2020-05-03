@@ -38,7 +38,7 @@ def get_args():
     parser.add_argument(
         '--batch-size',
         type=int,
-        default=8092)
+        default=32768)
     parser.add_argument(
         '--learning-rate',
         type=int,
@@ -74,7 +74,7 @@ def get_args():
     parser.add_argument(
         '--stored-batch-size',
         type=int,
-        default = 32768)
+        default = 131072)
     parser.add_argument(
         '--po',
         type=float,
@@ -95,6 +95,10 @@ def train_model(args):
     train_file_name = f'stored_{args.corpus_name}_maxsize_{args.max_vocabulary_size}_minocc_{args.min_occurrence}_window_{args.skip_window}_storedbatch_{args.stored_batch_size}.npy'
     train_file_path = os.path.join(args.job_dir, train_file_name)
     # print(train_file_name)
+
+    # if this fails, pipeline won't work properly generating incompatible tails.
+    assert args.stored_batch_size % args.batch_size == 0
+
     word2id, id2word, word_counts, id_counts = util.load_process_data(train_file_name, args)
     vocabulary_size = len(word2id)
 
@@ -103,7 +107,7 @@ def train_model(args):
     # TODO: Note this power is different in principle
     arr_counts[:] = arr_counts**args.po
     unigram = arr_counts/arr_counts.sum()
-    dataset = util.create_dataset_from_stored_batch_sizees(train_file_path, args.batch_size, args.stored_batch_size, args.neg_samples, unigram, args.threshold, args.po)
+    dataset = util.create_dataset_from_stored_batches(train_file_path, args.batch_size, args.stored_batch_size, args.neg_samples, unigram, args.threshold, args.po)
 
     # for batch in dataset.take(1):
     #    print(batch[0]['target'].shape, batch[1].shape)
@@ -112,6 +116,8 @@ def train_model(args):
     # create the model
     w2v_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples)
     w2v_model.compile(loss = model.Word2VecNEGLoss(), optimizer = w2v_model.optimizer)
+
+    # if restore model
 
     # train the model
     # TODO: checkpoints
