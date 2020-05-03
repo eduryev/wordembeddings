@@ -73,7 +73,7 @@ def split_gs_prefix(file_path):
 
 def download_from_gs(file_path):
     assert file_path[:5] == 'gs://'
-    print(f'Downloading {file_path} from Google Cloud Storage Bucket...')
+    print(f'Accessing {file_path} in Google Cloud Storage Bucket...')
     bucket_name, path_name = split_gs_prefix(file_path)
 
     client = storage.Client()
@@ -88,6 +88,21 @@ def download_from_gs(file_path):
     bl.download_to_filename(path_name)
 
     return path_name
+
+
+def upload_to_gs(path_to_upload, job_dir):
+    # assumes that path_to_upload is a local_path (so no bucket name)
+    if file_path[:5] != 'gs://':
+        return # nothing to be done
+    else:
+        assert os.path.exists(path_to_upload)
+        bucket_name, _  = split_gs_prefix(job_dir)
+
+        client = storage.Client()
+        bucket = client.get_bucket(bucket_name[5:])
+
+        bl = bucket.blob(path_to_upload)
+        bl.upload_from_filename(filename=path_to_upload)
 
 
 def load_raw_data(corpus_name, job_dir, perl_cleanup = True):

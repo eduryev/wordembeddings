@@ -23,7 +23,7 @@ class Word2VecModel(tf.keras.models.Model):
         if word2id:
             self.word2id = word2id
         if id2word:
-            self.id2word = id2word  
+            self.id2word = id2word
 
         self.loss = Word2VecNEGLoss()
         self.optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-3)
@@ -108,6 +108,7 @@ class Word2VecModel(tf.keras.models.Model):
         elif metric == 'cos':
             # note minus here!
             return -tf.matmul(self.normalize_rows(w_emb), self.normalize_rows(sample_emb), transpose_b=True)
+
 
     def get_closest(self, sample_emb = None, id_or_word_array = None, n_closest = 1, mode = 'target', metric = 'l2'):
         self.validate_metric_name(metric)
@@ -203,7 +204,7 @@ class Word2VecModel(tf.keras.models.Model):
             closest = self.get_closest(sample_emb = sample_emb,
                                         n_closest = 5 if ignore_triple else 1,
                                         mode = mode, metric = metric).numpy()
-          
+
             correct = 0
             for i, l, triple in zip(self.get_embedding(id_array[:,3], mode = mode), closest, id_array[:3]):
                 if i not in l:
@@ -214,7 +215,7 @@ class Word2VecModel(tf.keras.models.Model):
 
                 if len(set(other) - set(admissible)) == 0:
                     correct+= 1
-            
+
             out_dict[section] =  correct, oov, tot
 
         return out_dict
@@ -228,8 +229,3 @@ class Word2VecModel(tf.keras.models.Model):
                 res[match][1]+= oov
                 res[match][2]+= tot
         return res
-
-
-
-
-

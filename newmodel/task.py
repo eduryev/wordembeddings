@@ -1,6 +1,6 @@
 
 
-import time
+import time, datetime
 import argparse
 import os
 
@@ -10,8 +10,7 @@ import tensorflow as tf
 
 import newmodel.model as model #from . import model
 import newmodel.util as util #from . import util
-
-
+import newmodel.tests as tests
 
 
 def get_args():
@@ -31,6 +30,12 @@ def get_args():
         type=str,
         required=True,
         help='enwik8')
+    parser.add_argument(
+        '--log-dir',
+        type=str,
+        required=False,
+        default = 'logs',
+        help='Subfolder with checkpoints to restore the model from')
     parser.add_argument(
         '--restore-folder',
         type=str,
@@ -123,6 +128,13 @@ def train_model(args):
     w2v_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples)
     w2v_model.compile(loss = model.Word2VecNEGLoss(), optimizer = w2v_model.optimizer)
 
+    # prepare tests and callbacks
+    similarity_tests_dict = tests.get_similarity_tests(args.job_dir)
+    print('Found following similarity tests:')
+    print(similarity_tests_dict)
+    sim_out_file = 'sim_tests_' + datetime.datetime.now().strftime("%y%m%d_%H%M%S")
+    similarity_tests_callbacks, sim_out_path = tests.similarity_tests_callbacks(w2v_model, ['target', 'context'], ['l2', 'cos'], ['spearman', 'pearson'], similarity_tests_dict, args.job_dir, out_file = sim_out_file)
+
     # if restore-path is given restore the model
     if args.restore_folder is not None:
         restore_path = os.path.join(args.job_dir, 'saved_models', args.restore_folder)
@@ -135,14 +147,15 @@ def train_model(args):
         args.save_folder = args.restore_folder
 
     if args.save_folder is None:
-        w2v_model.fit(dataset, epochs = args.num_epochs)
+        w2v_model.fit(dataset, epochs = args.num_epochs, callbacks = similarity_tests_callbacks)
     else:
         ckpt_path = os.path.join(args.job_dir, 'saved_models', args.save_folder, 'cp-{epoch:04d}.ckpt')
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath = ckpt_path, save_weights_only = True,
                                                  verbose = 1, max_to_keep = 5, period = 1)
-        w2v_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback])
+        w2v_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback] + similarity_tests_callbacks)
 
-    # save terminal model
+    util.upload_to_gs(sim_out_path, args.job_dir)
+
 
 
 
