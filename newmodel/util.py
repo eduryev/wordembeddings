@@ -20,21 +20,21 @@ def load_unpack_zip(corpus_name, job_dir):
     Download zip file from Matt Mahoney's website and unpack to `job_dir`
     """
     zip_file_name = f'{corpus_name}.zip'
-    zip_file_path = os.path.join(job_dir, zip_file_name)
-    
+    zip_file_path = os.path.join(job_dir, 'model_data', zip_file_name)
+
     if job_dir[:5] == 'gs://':
         bucket_name, path_name = split_gs_prefix(zip_file_path)
-    
+
         client = storage.Client()
         # print(bucket_name[5:]) # this removes 'gs://'
         bucket = client.get_bucket(bucket_name[5:])
-        
+
         if storage.Blob(bucket=bucket, name=path_name[:-4]).exists(client):
-            print(f'Unzipped file {zip_file_name[:-4]} found in Google Cloud Storage Bucket at {job_dir}...')
+            print(f'Unzipped file {zip_file_name[:-4]} found in Google Cloud Storage Bucket at {job_dir}/model_data...')
             return
-        
+
         if storage.Blob(bucket=bucket, name=path_name).exists(client):
-            print(f'Corpus file {zip_file_name} found in Google Cloud Storage Bucket at {job_dir}...')
+            print(f'Corpus file {zip_file_name} found in Google Cloud Storage Bucket at {job_dir}/model_data...')
         else:
             bl = bucket.blob(path_name)
             url = 'http://mattmahoney.net/dc/' + zip_file_name
@@ -51,21 +51,18 @@ def load_unpack_zip(corpus_name, job_dir):
                 bl_unzip = bucket.blob(path_name[:-len(corpus_name)-4] + content_file_name) # remove .zip extension
                 bl_unzip.upload_from_string(content_file)
 
-        # print(list(bucket.list_blobs(prefix = path_name)))
-        # f='model/sample.txt'
-        # f = bucket.blob(f)
-        # f.upload_from_string('I am the best')
     else:
         if os.path.exists(zip_file_path):
             pass
         else:
             print(f'Downloading corpus file {zip_file_name}...')
             url = 'http://mattmahoney.net/dc/' + zip_file_name
-            if not os.path.exists(job_dir):
-                os.mkdir(job_dir)
+            data_dir = os.path.join(job_dir, 'model_data')
+            if not os.path.exists(data_dir):
+                os.mkdir(data_dir)
             urllib.request.urlretrieve(url, zip_file_path)
         with zipfile.ZipFile(zip_file_path, 'r') as zip_to_unpack:
-            zip_to_unpack.extractall(job_dir)
+            zip_to_unpack.extractall(data_dir)
 
 
 def split_gs_prefix(file_path):
@@ -96,29 +93,29 @@ def download_from_gs(file_path):
 def load_raw_data(corpus_name, job_dir, perl_cleanup = True):
     # TODO: make sure this works for both perl_cleanup values
     text_file_name = f'{corpus_name}.txt'
-    text_file_path = os.path.join(job_dir, text_file_name)
+    text_file_path = os.path.join(job_dir, 'model_data', text_file_name)
     print(text_file_path)
-    
+
     if job_dir[:5] == 'gs://': # work in google cloud storage
         bucket_name, path_name = split_gs_prefix(text_file_path)
 
         client = storage.Client()
         bucket = client.get_bucket(bucket_name[5:])
         if storage.Blob(bucket=bucket, name=path_name).exists(client):
-            print(f'Corpus file {text_file_name} found in Google Cloud Storage Bucket at {job_dir}...')
+            print(f'Corpus file {text_file_name} found in Google Cloud Storage Bucket at {job_dir}/model_data...')
             return text_file_path
         else:
             load_unpack_zip(corpus_name, job_dir)
         if perl_cleanup:
             assert os.path.exists('main_.pl')
-            
+
             bl = bucket.blob(path_name[:-4])
             bl.download_to_filename('corpus_temp')
 
             bash_str = f'perl main_.pl corpus_temp > corpus_temp.txt'
             print('Cleaning up the corpus...')
             subprocess.run(bash_str, shell = True)
-            
+
             bl = bucket.blob(path_name)
             bl.upload_from_filename(filename='corpus_temp.txt')
 
@@ -145,8 +142,6 @@ def load_raw_data(corpus_name, job_dir, perl_cleanup = True):
             os.rename(text_file_path[:-4], text_file_path)
         return text_file_path
 
-
-from collections import deque
 
 def count_skips(id_array, skip_window=5):
     def postprocess_count_skips(skips):
@@ -189,7 +184,7 @@ def preprocess_data(text_file_path, max_vocabulary_size, min_occurrence, skip_wi
     '''
     if text_file_path[:5] == 'gs://':
         text_file_path = download_from_gs(text_file_path)
-    
+
     with open(text_file_path) as text_file:
         word_array = tf.keras.preprocessing.text.text_to_word_sequence(text_file.readline())
 
@@ -231,13 +226,13 @@ def record_corpus_metadata(word2id, word_counts, meta_file_path):
         bucket_name, meta_file_path_ = split_gs_prefix(meta_file_path)
     else:
         meta_file_path_ = meta_file_path
-    
+
     with open(meta_file_path_, 'w+') as meta_file:
         for w, i in word2id.items():
             # TODO: consider integer id keys
             meta_file.write(str(i) + '\t' + w + '\t' + str(word_counts[w]) + '\n')
 
-    if meta_file_path[:5] == 'gs://':   
+    if meta_file_path[:5] == 'gs://':
         client = storage.Client()
         bucket = client.get_bucket(bucket_name[5:])
 
@@ -271,30 +266,30 @@ def load_process_data(file_name, args):
     # TODO: allow different stored batch sizes
     corpus_name = args.corpus_name
     job_dir = args.job_dir
-    file_path = os.path.join(job_dir, file_name)
+    file_path = os.path.join(job_dir, 'model_data', file_name)
 
     if job_dir[:5] == 'gs://': # Google Cloud Storage
-        bucket_name, path_name = split_gs_prefix(file_path)   
-        
+        bucket_name, path_name = split_gs_prefix(file_path)
+
         client = storage.Client()
         bucket = client.get_bucket(bucket_name[5:])
 
         if storage.Blob(bucket=bucket, name=path_name).exists(client):
             print(f'File {file_name} already exists. Nothing to be done. Consider checking contents.')
             # check_processed_data(file_name)
-            word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'meta' + file_name[6:-4] + '.tsv'))
+            word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'model_data', 'meta' + file_name[6:-4] + '.tsv'))
             return word2id, id2word, word_counts, id_counts
-        
+
     elif os.path.exists(file_path):
         print(f'File {file_name} already exists. Nothing to be done. Consider checking contents.')
         # check_processed_data(file_name)
-        word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'meta' + file_name[6:-4] + '.tsv'))
+        word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'model_data', 'meta' + file_name[6:-4] + '.tsv'))
         return word2id, id2word, word_counts, id_counts
 
 
     text_file_path = load_raw_data(corpus_name, job_dir)
     word2id, id2word, word_counts, id_counts, skips = preprocess_data(text_file_path, args.max_vocabulary_size, args.min_occurrence, args.skip_window)
-    record_corpus_metadata(word2id, word_counts, os.path.join(job_dir, 'meta' + file_name[6:-4] + '.tsv'))
+    record_corpus_metadata(word2id, word_counts, os.path.join(job_dir, 'model_data', 'meta' + file_name[6:-4] + '.tsv'))
 
     # save skips in a file
     stored_batch_size = args.stored_batch_size
@@ -326,19 +321,19 @@ def load_process_data(file_name, args):
     text_file_path = load_raw_data(corpus_name, job_dir)
     if job_dir[:5] == 'gs://':
         ind = [i for i,l in enumerate(file_path) if l == '/'][2]
-        bucket_name, path_name = file_path[:ind], file_path[ind+1:]  
+        bucket_name, path_name = file_path[:ind], file_path[ind+1:]
         del ind
 
         client = storage.Client()
         bucket = client.get_bucket(bucket_name[5:])
         assert storage.Blob(bucket=bucket, name=text_file_path).exists(client)
-        
-    else:    
+
+    else:
         assert os.path.exists(text_file_path)
 
     # continue here!
     word2id, id2word, word_counts, id_counts, skips = preprocess_data(text_file_path, args.max_vocabulary_size, args.min_occurrence, args.skip_window)
-    record_corpus_metadata(word2id, word_counts, os.path.join(job_dir, 'meta' + file_name[6:-4] + '.tsv'))
+    record_corpus_metadata(word2id, word_counts, os.path.join(job_dir, 'model_data', 'meta' + file_name[6:-4] + '.tsv'))
 
     # save skips in a file
     stored_batch_size = args.stored_batch_size
@@ -364,10 +359,10 @@ def create_dataset_from_stored_batches(file_path, batch_size, stored_batch_size,
         return iter(data_memmap)
 
     if file_path[:5] == 'gs://':
-        file_path = download_from_gs(file_path) 
+        file_path = download_from_gs(file_path)
     numpy_data_memmap = np.load(file_path, mmap_mode='r')
-    #print(f'My shape is {np.load(file_path).shape}') 
-    
+    #print(f'My shape is {np.load(file_path).shape}')
+
 
     pos_dataset = tf.data.Dataset.from_generator(
         generator=data_generator,

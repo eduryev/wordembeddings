@@ -32,6 +32,20 @@ def get_args():
         required=True,
         help='enwik8')
     parser.add_argument(
+        '--restore-folder',
+        type=str,
+        required=False,
+        default = None,
+        help='Subfolder with checkpoints to restore the model from')
+        )
+    parser.add_argument(
+        '--save-folder',
+        type=str,
+        required=False,
+        default=None,
+        help='Subfolder to store model results')
+        )
+    parser.add_argument(
         '--num-epochs',
         type=int,
         default=1)
@@ -83,7 +97,6 @@ def get_args():
         '--threshold',
         type=int,
         default = 100)
-
     args, _ = parser.parse_known_args()
     return args
 
@@ -93,8 +106,7 @@ def train_model(args):
 
     # TODO: replace with vocabulary formatting
     train_file_name = f'stored_{args.corpus_name}_maxsize_{args.max_vocabulary_size}_minocc_{args.min_occurrence}_window_{args.skip_window}_storedbatch_{args.stored_batch_size}.npy'
-    train_file_path = os.path.join(args.job_dir, train_file_name)
-    # print(train_file_name)
+    train_file_path = os.path.join(args.job_dir, 'model_data', train_file_name)
 
     # if this fails, pipeline won't work properly generating incompatible tails.
     assert args.stored_batch_size % args.batch_size == 0
@@ -109,19 +121,26 @@ def train_model(args):
     unigram = arr_counts/arr_counts.sum()
     dataset = util.create_dataset_from_stored_batches(train_file_path, args.batch_size, args.stored_batch_size, args.neg_samples, unigram, args.threshold, args.po)
 
-    # for batch in dataset.take(1):
-    #    print(batch[0]['target'].shape, batch[1].shape)
-
-    
     # create the model
     w2v_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples)
     w2v_model.compile(loss = model.Word2VecNEGLoss(), optimizer = w2v_model.optimizer)
 
-    # if restore model
+    # if restore-path is given restore the model
+    if args.restore_folder:
+        checkpoint_path = tf.train.latest_checkpoint(os.path.join(args.joib_dir, 'saved_models', args.restore_folder))
+        w2v_model.load_weights(latest)
 
     # train the model
-    # TODO: checkpoints
-    w2v_model.fit(dataset, epochs = 1)
+    if args.save_folder is None: # save to restore_folder unless instructed otherwise
+        args.save_folder = args.restore_folder
+
+    if args.save_folder is None:
+        w2v_model.fit(dataset, epochs = 1)
+    else:
+        save_dir = os.path.join(args.joib_dir, 'saved_models', args.save_folder)
+        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath = save_dir, save_weights_only = True,
+                                                 verbose = 1, max_to_keep = 5, period = 1)
+        
 
     # save terminal model
 
