@@ -83,7 +83,7 @@ def download_from_gs(file_path):
 
     ind = [i for i,l in enumerate(path_name) if l == '/'][-1]
     if not os.path.exists(path_name[:ind]):
-        os.mkdir(path_name[:ind])
+        os.makedirs(path_name[:ind], exist_ok = True)
 
     bl.download_to_filename(path_name)
 

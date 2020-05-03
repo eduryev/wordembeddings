@@ -37,14 +37,12 @@ def get_args():
         required=False,
         default = None,
         help='Subfolder with checkpoints to restore the model from')
-        )
     parser.add_argument(
         '--save-folder',
         type=str,
         required=False,
         default=None,
         help='Subfolder to store model results')
-        )
     parser.add_argument(
         '--num-epochs',
         type=int,
@@ -126,8 +124,10 @@ def train_model(args):
     w2v_model.compile(loss = model.Word2VecNEGLoss(), optimizer = w2v_model.optimizer)
 
     # if restore-path is given restore the model
-    if args.restore_folder:
-        checkpoint_path = tf.train.latest_checkpoint(os.path.join(args.joib_dir, 'saved_models', args.restore_folder))
+    if args.restore_folder is not None:
+        restore_path = os.path.join(args.job_dir, 'saved_models', args.restore_folder)
+        print(f'Restoring model weights from {restore_path}')
+        latest = tf.train.latest_checkpoint(restore_path)
         w2v_model.load_weights(latest)
 
     # train the model
@@ -135,12 +135,12 @@ def train_model(args):
         args.save_folder = args.restore_folder
 
     if args.save_folder is None:
-        w2v_model.fit(dataset, epochs = 1)
+        w2v_model.fit(dataset, epochs = args.num_epochs)
     else:
-        save_dir = os.path.join(args.joib_dir, 'saved_models', args.save_folder)
-        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath = save_dir, save_weights_only = True,
+        ckpt_path = os.path.join(args.job_dir, 'saved_models', args.save_folder, 'cp-{epoch:04d}.ckpt')
+        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath = ckpt_path, save_weights_only = True,
                                                  verbose = 1, max_to_keep = 5, period = 1)
-        
+        w2v_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback])
 
     # save terminal model
 
