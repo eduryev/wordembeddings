@@ -35,11 +35,17 @@ def get_similarity_tests(job_dir):
         bucket_name, path_name = util.split_gs_prefix(tests_path)
         client = storage.Client()
         bucket = client.get_bucket(bucket_name[5:])
-        if storage.Blob(bucket=bucket, name=path_name).exists(client):
+
+        bl_list = bucket.list_blobs(prefix = path_name)        
+        if len(list(bl_list)) > 0: #tests found
             if os.path.exists(path_name):
                 os.remove(path_name)
-            tests_path = util.download_from_gs(tests_path)
-        elif os.path.exists(path_name):
+            os.makedirs(path_name, exist_ok = True)
+            for bl in bucket.list_blobs(prefix = path_name):
+                if bl.name[-4:] in ('.txt','.tsv'):
+                    bl.download_to_filename(bl.name)
+            tests_path = path_name
+        elif os.path.exists(path_name): # TODO: handle iteration over multiple files
             util.upload_to_gs(path_name, tests_path)
             tests_path = path_name
         else:
