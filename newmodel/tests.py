@@ -9,8 +9,6 @@ from tensorflow import summary
 
 from google.cloud import storage
 
-
-
 SIMILARITY_TEST_NAMES =  {
      'MC-30.tsv': 'MC',
      'men.tsv':'MEN',
@@ -31,12 +29,12 @@ def get_similarity_tests(job_dir):
     if job_dir[:5] == 'gs://': # make the file available in the container
         # if tests are found in gcp bucket, overwrite local tests
         # else attempt using local test AND upload them to Google Storage Bucket
-        
+
         bucket_name, path_name = util.split_gs_prefix(tests_path)
         client = storage.Client()
         bucket = client.get_bucket(bucket_name[5:])
 
-        bl_list = bucket.list_blobs(prefix = path_name)        
+        bl_list = bucket.list_blobs(prefix = path_name)
         if len(list(bl_list)) > 0: #tests found
             if os.path.exists(path_name):
                 os.remove(path_name)
@@ -83,7 +81,7 @@ def similarity_tests_callbacks(model, mode_list, metric_list, output_stat_list, 
         def callback_func(epoch, logs):
             file_writer = summary.create_file_writer(os.path.join(log_dir, f'metrics/{mode}_{metric}'))
             file_writer.set_as_default()
-                
+
             for test_name, test_path in tests_dict.items():
                 if out_path:
                     with open(out_path, 'a') as out:
@@ -108,7 +106,7 @@ def similarity_tests_callbacks(model, mode_list, metric_list, output_stat_list, 
     for mode in mode_list:
         for metric in metric_list:
             print(mode, metric)
- 
+
             callback_func = callback_factory(mode, metric)
             callback = LambdaCallback(on_epoch_end = callback_func)
             callback_list.append(callback)

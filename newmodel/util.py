@@ -5,7 +5,7 @@ import tensorflow as tf
 import subprocess
 import os
 import urllib
-import zipfile
+import zipfile, bz2
 
 from collections import deque, Counter
 from tqdm import tqdm
@@ -14,6 +14,24 @@ from google.cloud import storage
 import io
 
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'test-ai-docker.json'
+
+WIKI_DUMP_URLS = {0:'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles1.xml-p1p30303.bz2',
+    1: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles2.xml-p30304p88444.bz2',
+    # 2: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles3.xml-p88445p200509.bz2',
+    # 3: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles4.xml-p200510p352689.bz2',
+    # 4: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles5.xml-p352690p565313.bz2',
+    # 5: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles6.xml-p565314p892912.bz2',
+    # 6: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles7.xml-p892913p1268691.bz2',
+    # 7: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles8.xml-p1268692p1791079.bz2',
+    # 8: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles9.xml-p1791080p2336422.bz2',
+    # 9: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles10.xml-p2336423p3046512.bz2',
+    # 10: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles11.xml-p3046513p3926861.bz2',
+    # 11: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles12.xml-p3926862p5040436.bz2',
+    # 12: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles13.xml-p5040437p6197594.bz2',
+    # 13: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles14.xml-p6197595p7697594.bz2',
+    14: 'https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles15.xml-p7744801p9244800.bz2'}
+
+
 
 def load_unpack_zip(corpus_name, job_dir):
     """
@@ -63,6 +81,58 @@ def load_unpack_zip(corpus_name, job_dir):
             urllib.request.urlretrieve(url, zip_file_path)
         with zipfile.ZipFile(zip_file_path, 'r') as zip_to_unpack:
             zip_to_unpack.extractall(data_dir)
+
+
+def load_unpack_bz2url(ind, job_dir):
+    """
+    Download wikidumpfiles
+    """
+    url = WIKI_DUMP_URLS[ind]
+    out_file_name = f'enwiki_dump_{ind}'
+    out_file_path = os.path.join(job_dir, 'model_data', out_file_name)
+
+    if job_dir[:5] == 'gs://':
+        bucket_name, path_name = split_gs_prefix(out_file_path)
+
+        client = storage.Client()
+        bucket = client.get_bucket(bucket_name[5:])
+        if storage.Blob(bucket=bucket, name=path_name).exists(client):
+            print(f'Corpus file {out_file_name} found in Google Cloud Storage Bucket at {job_dir}/model_data...')
+            return
+    else:
+        if os.path.exists(out_file_path):
+            print(f'Corpus file {out_file_name} found in locally in {job_dir}/model_data...')
+            return
+
+    raw_bz2 = 'raw_file.bz2'
+    raw_txt = 'raw_file.txt'
+
+    print(f'Downloading wikidump file {out_file_name}...')
+    urllib.request(url, raw_bz2)
+
+    stream = bz2.BZ2File(raw_bz2).readlines()
+    with open(raw_txt, 'wb+') as out:
+        for line in stream:
+            out.write(line)
+
+    if not os.path.exists(os.path.dirname(out_file_path)):
+        os.makedirs(os.path.dirname(out_file_path), exist_ok = True)
+    stream = open(raw_txt)
+    with open(out_file_path, 'w+') as out:
+        for line in stream:
+            line = line.strip()
+            if line:
+                letter = line[0]
+                # the line starts with a character, a number or a quote
+                if letter.isalpha() or letter.isnumeric() or letter in ('"', "'"):
+                    out.write(line = '\n')
+
+    os.remove(raw_txt)
+    os.remove(raw_bz2)
+
+    if job_dir[:5] == 'gs://':
+        upload_to_gs(out_file_path, job_dir)
+        os.remove(out_file_path) # remove local file
 
 
 def split_gs_prefix(file_path):
@@ -119,7 +189,7 @@ def load_raw_data(corpus_name, job_dir, perl_cleanup = True):
         bucket = client.get_bucket(bucket_name[5:])
         if storage.Blob(bucket=bucket, name=path_name).exists(client):
             print(f'Corpus file {text_file_name} found in Google Cloud Storage Bucket at {job_dir}/model_data...')
-            return text_file_path
+            return [text_file_path]
         else:
             load_unpack_zip(corpus_name, job_dir)
         if perl_cleanup:
@@ -138,12 +208,12 @@ def load_raw_data(corpus_name, job_dir, perl_cleanup = True):
             print(f'Done loading the corpus. File is written to {text_file_name}')
             os.remove('corpus_temp.txt')
             os.remove('corpus_temp')
-        return text_file_path
+        return [text_file_path]
 
     else:
         if os.path.exists(text_file_path):
             print(f'File {text_file_name} already exists. Nothing to be done.')
-            return text_file_path
+            return [text_file_path]
         else:
             load_unpack_zip(corpus_name, job_dir)
         if perl_cleanup:
@@ -156,12 +226,22 @@ def load_raw_data(corpus_name, job_dir, perl_cleanup = True):
             print(f'Done loading the corpus. File is writtten to {text_file_name}')
         else: # text8 is already processed, so just need to add .txt extenstion
             os.rename(text_file_path[:-4], text_file_path)
-        return text_file_path
+        return [text_file_path]
+
+
+def load_dump_urls(job_dir, perl_cleanup = True):
+    text_file_paths = []
+
+    for ind in WIKI_DUMP_URLS.keys():
+        out_file_name = f'enwiki_dump_{ind}'
+        out_file_path = os.path.join(job_dir, 'model_data', out_file_name)
+        text_file_paths +=  load_raw_data(corpus_name, job_dir, perl_cleanup = perl_cleanup)
+    return text_file_paths
 
 
 def count_skips(id_array, skip_window=5):
     def postprocess_count_skips(skips):
-        return np.array([[k, i, j] for (i, j), k in skips.items()], dtype = np.int32)
+        return np.array([[k, i, j] for (i, j), k in skips.items()], dtype = np.float32)
 
     d = dict()
     corpus_len = len(id_array)
@@ -188,8 +268,33 @@ def count_skips(id_array, skip_window=5):
     return np.concatenate([res, res[np.where(res[:,1]!=res[:,2])][:,[0,2,1]]], axis = 0)
 
 
-# TODO: is it resilient for gigabytes of data?
-def preprocess_data(text_file_path, max_vocabulary_size, min_occurrence, skip_window):
+def save_skips_shards(skips_tmp, n_shards = 10):
+    n_rows = len(skips_tmp)
+    n_shards = min(n_rows, n_shards)
+    shard_size = n_rows//n_shards + (n_rows%shard_size > 0)
+
+    shard_files = [file_name in os.listdir() if file_name.find('shard') > 0]
+    max_shard = max(list(map(int, [shard_file[shard_file.find('_')+1:] for shard_file in shard_files]))) if shard_files else -1
+
+    skip_shards = []
+    for s in range(n_shards):
+        max_shard+= 1
+        shard_name = f'shard_{max_shard}.npy'
+        np.save(shard_name, skips_tmp[s*shard_size:(s+1)*shard_size])
+        skip_shards.append(shard_name)
+    return skip_shards
+
+
+def collect_skip_shards(skip_shards):
+    print(f'Collecting skip shards from {skip_shards}')
+    pair_counter = Counter()
+    for shard in skip_shards:
+        skips_tmp = np.load(shard)
+        pair_counter.update({(i,j):k for k,i,j in skips_tmp})
+    return np.array([[k, i, j] for (i, j), k in pair_counter.items()], dtype = np.float32)
+
+
+def preprocess_data_mult(text_file_paths, max_vocabulary_size, min_occurrence, skip_window):
     '''
     Create from a corpus name a triple (word2id, id2word, word_counts, skips)
 
@@ -198,13 +303,18 @@ def preprocess_data(text_file_path, max_vocabulary_size, min_occurrence, skip_wi
         'word_counts' dictionary keyed on words
         'skips' np.array of triples returned by 'count_skips'
     '''
-    if text_file_path[:5] == 'gs://':
-        text_file_path = download_from_gs(text_file_path)
+    word_counts = Counter()
+    for text_file_path in text_file_paths:
+        if text_file_path[:5] == 'gs://':
+            text_file_path = download_from_gs(text_file_path)
 
-    with open(text_file_path) as text_file:
-        word_array = tf.keras.preprocessing.text.text_to_word_sequence(text_file.readline())
+        with open(text_file_path) as text_file:
+            word_array = tf.keras.preprocessing.text.text_to_word_sequence(text_file.readline())
+            word_counts.update(word_array)
 
-    word_counts = Counter(word_array).most_common(max_vocabulary_size - 1)
+    word_counts = Counter(word_array).most_common(max_vocabulary_size - 1) # leave one spot for 'UNK' token
+    if len(text_file_paths) > 1:
+        del word_array
 
     for i in range(len(word_counts) - 1, -1, -1):
         if word_counts[i][1] < min_occurrence:
@@ -220,12 +330,30 @@ def preprocess_data(text_file_path, max_vocabulary_size, min_occurrence, skip_wi
     word_counts = {w:c for w, c in word_counts}
     id_counts = {i:word_counts[w] for i, w in id2word.items()}
 
-    id_array = list(map(lambda x: word2id.get(x, 0), word_array))
-
+    # now create skips from each file and store them in small batches:
     print('Counting skips. It may take some time...')
-    skips = count_skips(id_array, skip_window)
+    if len(text_file_paths) <= 1: # word_array was kept so far
+        id_array = list(map(lambda x: word2id.get(x, 0), word_array))
+        skips = count_skips(id_array, skip_window)
+    else:
+        skip_shards = []
+        for text_file_path in text_file_paths:
+            if text_file_path[:5] == 'gs://':
+                text_file_path = download_from_gs(text_file_path)
+            with open(text_file_path) as text_file:
+                word_array = tf.keras.preprocessing.text.text_to_word_sequence(text_file.readline())
+                id_array = list(map(lambda x: word2id.get(x, 0), word_array))
+                skips_tmp = count_skips(id_array, skip_window)
+                skip_shards.append(save_skips_shards(skips_tmp, n_shards = 10))
+        skips = collect_skip_shards(skip_shards)
 
     print('Done!')
+    return word2id, id2word, word_counts, id_counts, skips
+
+
+def preprocess_data(text_file_path, max_vocabulary_size, min_occurrence, skip_window):
+    word2id, id2word, word_counts, id_counts, skips = preprocess_data_mult([text_file_path], max_vocabulary_size, min_occurrence, skip_window)
+
     return word2id, id2word, word_counts, id_counts, skips
 
 
@@ -302,9 +430,12 @@ def load_process_data(file_name, args):
         word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'model_data', 'meta' + file_name[6:-4] + '.tsv'))
         return word2id, id2word, word_counts, id_counts
 
+    if args.corpus_name == 'enwiki_dump':
+        load_dump_urls(job_dir)
+    else:
+        text_file_paths = load_raw_data(corpus_name, job_dir)
 
-    text_file_path = load_raw_data(corpus_name, job_dir)
-    word2id, id2word, word_counts, id_counts, skips = preprocess_data(text_file_path, args.max_vocabulary_size, args.min_occurrence, args.skip_window)
+    word2id, id2word, word_counts, id_counts, skips = preprocess_data_mult(text_file_paths, args.max_vocabulary_size, args.min_occurrence, args.skip_window)
     record_corpus_metadata(word2id, word_counts, os.path.join(job_dir, 'model_data', 'meta' + file_name[6:-4] + '.tsv'))
 
     # save skips in a file
@@ -325,50 +456,6 @@ def load_process_data(file_name, args):
         assert os.path.exists(file_path)
     return word2id, id2word, word_counts, id_counts
 
-
-    # if file is already there check and skip processing
-    if os.path.exists(file_path):
-        print(f'File {file_name} already exists. Nothing to be done. Consider checking contents.')
-        # check_processed_data(file_name)
-        word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'meta' + file_name[6:-4] + '.tsv'))
-        return word2id, id2word, word_counts, id_counts
-
-    # handles downloading and unpacking text file to job_dir locally or in Google Storage Bucket
-    text_file_path = load_raw_data(corpus_name, job_dir)
-    if job_dir[:5] == 'gs://':
-        ind = [i for i,l in enumerate(file_path) if l == '/'][2]
-        bucket_name, path_name = file_path[:ind], file_path[ind+1:]
-        del ind
-
-        client = storage.Client()
-        bucket = client.get_bucket(bucket_name[5:])
-        assert storage.Blob(bucket=bucket, name=text_file_path).exists(client)
-
-    else:
-        assert os.path.exists(text_file_path)
-
-    # continue here!
-    word2id, id2word, word_counts, id_counts, skips = preprocess_data(text_file_path, args.max_vocabulary_size, args.min_occurrence, args.skip_window)
-    record_corpus_metadata(word2id, word_counts, os.path.join(job_dir, 'model_data', 'meta' + file_name[6:-4] + '.tsv'))
-
-    # save skips in a file
-    stored_batch_size = args.stored_batch_size
-    r = skips.shape[0]%stored_batch_size
-
-    ## (num_occurrences, target, context), complete the batch
-    np.save(file_path, np.concatenate([skips, skips[:((stored_batch_size - r) if r!= 0 else 0),:]], axis = 0).reshape(-1, stored_batch_size, 3))
-
-    assert os.path.exists(file_path)
-    return word2id, id2word, word_counts, id_counts
-
-
-# def regenerate_neg_samples(neg_file_path, neg_samples, stored_batch_size, sampling_distribution):
-#     # TODO: Think of replacing 100 with something else
-#     vocabulary_size = sampling_distribution.shape[0]
-#     neg_np = np.random.choice(np.arange(vocabulary_size, dtype = np.int32),
-#                                     stored_batch_size*neg_samples,
-#                                     p = sampling_distribution).reshape(100, stored_batch_size, neg_samples)
-#
 
 def create_dataset_from_stored_batches(file_path, batch_size, stored_batch_size, neg_samples, sampling_distribution, threshold, po):
     def data_generator(data_memmap):

@@ -1,5 +1,3 @@
-
-
 import time, datetime
 import argparse
 import os
@@ -153,7 +151,7 @@ def train_model(args):
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath = ckpt_path, save_weights_only = True,
                                                  verbose = 1, max_to_keep = 5, period = 1)
         w2v_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback] + similarity_tests_callbacks)
-    
+
     util.upload_to_gs(sim_out_path, args.job_dir)
 
 
