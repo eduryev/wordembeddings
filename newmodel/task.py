@@ -125,14 +125,14 @@ def train_model(args):
     dataset = util.create_dataset_from_stored_batches(train_file_path, args.batch_size, args.stored_batch_size, args.neg_samples, unigram, args.threshold, args.po)
 
     # create the model
-    w2v_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples)
+    w2v_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
     w2v_model.compile(loss = model.Word2VecNEGLoss(), optimizer = w2v_model.optimizer)
 
     # prepare tests and callbacks
     similarity_tests_dict = tests.get_similarity_tests(args.job_dir)
     print('Found following similarity tests:')
     print(similarity_tests_dict)
-    sim_out_file = 'sim_tests_' + datetime.datetime.now().strftime("%y%m%d_%H%M%S")
+    sim_out_file = 'sim_tests_' + datetime.datetime.now().strftime("%y%m%d_%H%M%S") + '.tsv'
     similarity_tests_callbacks, sim_out_path = tests.similarity_tests_callbacks(w2v_model, ['target', 'context'], ['l2', 'cos'], ['spearman', 'pearson'], similarity_tests_dict, args.job_dir, out_file = sim_out_file)
 
     # if restore-path is given restore the model
@@ -153,10 +153,8 @@ def train_model(args):
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath = ckpt_path, save_weights_only = True,
                                                  verbose = 1, max_to_keep = 5, period = 1)
         w2v_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback] + similarity_tests_callbacks)
-
+    
     util.upload_to_gs(sim_out_path, args.job_dir)
-
-
 
 
 if __name__ == '__main__':

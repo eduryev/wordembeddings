@@ -5,7 +5,7 @@ import os
 
 import newmodel.util as util
 from tensorflow.keras.callbacks import LambdaCallback
-from tensorflow.summary import create_file_writer, scalar
+from tensorflow import summary
 
 from google.cloud import storage
 
@@ -79,31 +79,38 @@ def similarity_tests_callbacks(model, mode_list, metric_list, output_stat_list, 
     else:
         out_path = None
 
+    def callback_factory(mode, metric):
+        def callback_func(epoch, logs):
+            file_writer = summary.create_file_writer(os.path.join(log_dir, f'metrics/{mode}_{metric}'))
+            file_writer.set_as_default()
+                
+            for test_name, test_path in tests_dict.items():
+                if out_path:
+                    with open(out_path, 'a') as out:
+                        out.write(test_name + '\t')
+
+                # separate summary for each test and stat
+                for output_stat in output_stat_list:
+                    res = model.similarity_test(test_path, mode=mode, metric=metric, output_stat=output_stat)
+                    summary.scalar(test_name + '_' + output_stat, data = res[0], step = epoch)
+
+                    if out_path: # record stat
+                        with open(out_path, 'a') as out:
+                            out.write('{0:.5f}\t'.format(res[0]))
+
+                if out_path: # record oov_pct
+                    with open(out_path, 'a') as out:
+                        out.write('{0:.5f}\n'.format(res[-1]))
+        return callback_func
+
+
     # create a log for each (mode, metric) pair
     for mode in mode_list:
         for metric in metric_list:
-
-            file_writer = create_file_writer(os.path.join(log_dir, f'metrics/{mode}_{metric}'))
-            def callback_func(epoch, logs):
-                for test_name, test_path in tests_dict.items():
-                    if out_path:
-                        with open(out_path, 'a') as out:
-                            out.write(test_name + '\t')
-
-                    # separate summary for each test and stat
-                    for output_stat in output_stat_list:
-                        res = model.similarity_test(test_path, mode=mode, metric=metric, output_stat=output_stat)
-                        summary.scalar(test_name + '_' + output_stat, data = res[0], step = epoch)
-
-                        if out_path: # record stat
-                            with open(out_path, 'a') as out:
-                                out.write('{0:.5f}\t'.format(res[0]))
-
-                    if out_path: # recor oov_pct
-                        with open(out_path, 'a') as out:
-                            out.write('{0:.5f}\n'.format(res[-1]))
-
-            callback = LambdaCallback(on_epoch_end = lambda epoch, logs: callback_func(epoch, log))
+            print(mode, metric)
+ 
+            callback_func = callback_factory(mode, metric)
+            callback = LambdaCallback(on_epoch_end = callback_func)
             callback_list.append(callback)
 
     return callback_list, out_path

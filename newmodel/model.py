@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Dot, Embedding, Input, Reshape, concatenate
 
+from scipy.stats import spearmanr, pearsonr
 
 class Word2VecNEGLoss(tf.keras.losses.Loss):
     def __init__(self, pow = 1., thresh = 100.):

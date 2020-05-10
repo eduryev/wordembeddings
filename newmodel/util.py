@@ -92,7 +92,8 @@ def download_from_gs(file_path):
 
 def upload_to_gs(path_to_upload, job_dir):
     # assumes that path_to_upload is a local_path (so no bucket name)
-    if file_path[:5] != 'gs://':
+    if job_dir[:5] != 'gs://':
+        print(f'File is not uploaded to Google Cloud Storage in \'upload_to_gs\' call. Address {job_dir} provided is not a cloud location')
         return # nothing to be done
     else:
         assert os.path.exists(path_to_upload)
@@ -412,7 +413,7 @@ def create_dataset_from_stored_batches(file_path, batch_size, stored_batch_size,
         output_shapes=(stored_batch_size, neg_samples)).repeat(256*32*2**15//(stored_batch_size*period)).unbatch().batch(batch_size)
 
 
-    pn_dataset = tf.data.Dataset.zip((pos_dataset, neg_dataset))
+    pn_dataset = tf.data.Dataset.zip((pos_dataset, neg_dataset)).take(3)
 
     return pn_dataset.map(lambda x, y: ({'target': x[:, 1],'pos': x[:, 2], 'neg': y}
                                              , tf.pow(tf.clip_by_value(x[:,0]/threshold, 1., 0.), po)))
