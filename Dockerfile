@@ -69,7 +69,7 @@ RUN pip3 install --upgrade setuptools pip google-api-core
 # Installs pytorch and torchvision plus other core packages
 # RUN pip3 install torch==1.4.0 torchvision==0.5.0 advertorch
 # Install smaller packages
-RUN pip3 install pyyaml tqdm google-cloud-storage
+RUN pip3 install pyyaml tqdm google-cloud-storage retrying
 
 # Copies the trainer code
 #RUN mkdir /root/cifar /root/torchattacks
