@@ -268,3 +268,40 @@ class GloveModel(BaseModel):
         pred = self.add_layer([dotted, b_context, b_target])
 
         return self.reshape_layer(pred)
+
+
+class HypGloveModel(BaseModel):
+    def __init__(self, vocabulary_size, embedding_size, neg_samples, word2id = None, id2word = None):
+        super().__init__(vocabulary_size, embedding_size, neg_samples, word2id = word2id, id2word = id2word)
+
+        # model specific part         
+        self.loss = GloveLoss()
+
+        self.target_bias = Embedding(vocabulary_size, 1, input_length=1, name='target_bias')
+        self.target_sigma = Embedding(vocabulary_size, 1, input_length=1, embeddings_initializer = tf.keras.initializers.Constant(value=0.1), name='target_sigma')
+        self.context_bias = Embedding(vocabulary_size, 1, input_length=1, name='context_bias')
+
+        self.dot_layer = Dot(axes = -1)
+        self.add_layer = Add()
+        self.reshape_layer = Reshape((1, ))
+
+
+    def call(self, inputs):
+        """
+        Returns an array of scalar products and embeddings of positive/negative samples
+        """
+        w_target = self.W_embedding(inputs['target'])
+        w_context = self.C_embedding(inputs['pos'])
+        b_target = self.target_bias(inputs['target'])
+        b_context = self.context_bias(inputs['pos'])
+        sigma = self.target_sigma(inputs['target'])
+
+        w_target_scaled = w_target/sigma
+        w_context_scaled = w_context/sigma
+
+        context_scaled_norm = self.dot_layer([w_context_scaled, w_context_scaled])/(-2)
+        target_context_scaled_dot = self.dot_layer([w_target_scaled, w_context_scaled]) 
+
+        pred = self.add_layer([target_context_scaled_dot, context_scaled_norm, b_target, b_context])
+
+        return self.reshape_layer(pred)
