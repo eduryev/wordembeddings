@@ -24,10 +24,16 @@ def get_args():
         required=True,
         help='local or GCS location for writing checkpoints and exporting models')
     parser.add_argument(
+        '--mode',
+        type=str,
+        required=True,
+        default = 'glove',
+        help='glove, hypglove, word2vec')
+    parser.add_argument(
         '--corpus-name',
         type=str,
         required=True,
-        help='enwik8')
+        help='enwik8, enwik9, enwiki_dump')
     parser.add_argument(
         '--log-dir',
         type=str,
@@ -105,8 +111,7 @@ def get_args():
 def train_model(args):
     # download and process data if does not exist
 
-    # TODO: replace with vocabulary formatting
-    train_file_name = f'stored_{args.corpus_name}_maxsize_{args.max_vocabulary_size}_minocc_{args.min_occurrence}_window_{args.skip_window}_storedbatch_{args.stored_batch_size}.npy'
+    train_file_name = 'stored_{corpus_name}_maxsize_{max_vocabulary_size}_minocc_{min_occurrence}_window_{skip_window}_storedbatch_{stored_batch_size}'.format(**args.__dict__)
     train_file_path = os.path.join(args.job_dir, 'model_data', train_file_name)
 
     # if this fails, pipeline won't work properly generating incompatible tails.
@@ -116,46 +121,58 @@ def train_model(args):
     vocabulary_size = len(word2id)
 
     # create the dataset
-    arr_counts = np.array([id_counts[i] for i in range(len(id2word))], dtype = np.float32)
     # TODO: Note this power is different in principle
+    arr_counts = np.array([id_counts[i] for i in range(len(id2word))], dtype = np.float32)
     arr_counts[:] = arr_counts**args.po
     unigram = arr_counts/arr_counts.sum()
-    dataset = util.create_dataset_from_stored_batches(train_file_path, args.batch_size, args.stored_batch_size, args.neg_samples, unigram, args.threshold, args.po)
+    
+    neg_samples = 0 if args.mode in ['glove', 'hypglove'] else args.neg_samples
+    dataset = util.create_dataset_from_stored_batches(train_file_path, args.batch_size, args.stored_batch_size, unigram, args.threshold, args.po, neg_samples)
 
-    # create the model
-    w2v_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
-    w2v_model.compile(loss = model.Word2VecNEGLoss(), optimizer = w2v_model.optimizer)
+    # create the model and follow additional model specific instructions (e.g. callbacks)
+    if args.mode == 'glove':
+        train_model = model.GloveModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
+        train_model.compile(loss = train_model.loss, optimizer = train_model.optimizer)
+    elif args.mode == 'word2vec':
+        train_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
+        train_model.compile(loss = train_model.loss, optimizer = train_model.optimizer)
+    else:
+        raise NotImplementedError
 
+    # EDIK: these callbacks need to be reworked, see tests.py if you want to reuse anything
     # prepare tests and callbacks
     similarity_tests_dict = tests.get_similarity_tests(args.job_dir)
     print('Found following similarity tests:')
     print(similarity_tests_dict)
     sim_out_file = 'sim_tests_' + datetime.datetime.now().strftime("%y%m%d_%H%M%S") + '.tsv'
-    similarity_tests_callbacks, sim_out_path = tests.similarity_tests_callbacks(w2v_model, ['target', 'context'], ['l2', 'cos'], ['spearman', 'pearson'], similarity_tests_dict, args.job_dir, out_file = sim_out_file)
+    similarity_tests_callbacks, sim_out_path = tests.similarity_tests_callbacks(train_model, ['target', 'context'], ['l2', 'cos'], ['spearman', 'pearson'], similarity_tests_dict, args.job_dir, out_file = sim_out_file)
 
     # if restore-path is given restore the model
     if args.restore_folder is not None:
         restore_path = os.path.join(args.job_dir, 'saved_models', args.restore_folder)
         print(f'Restoring model weights from {restore_path}')
         latest = tf.train.latest_checkpoint(restore_path)
-        w2v_model.load_weights(latest)
+        train_model.load_weights(latest)
 
     # train the model
     if args.save_folder is None: # save to restore_folder unless instructed otherwise
         args.save_folder = args.restore_folder
 
     if args.save_folder is None:
-        w2v_model.fit(dataset, epochs = args.num_epochs, callbacks = similarity_tests_callbacks)
+        train_model.fit(dataset, epochs = args.num_epochs, callbacks = similarity_tests_callbacks)
     else:
         ckpt_path = os.path.join(args.job_dir, 'saved_models', args.save_folder, 'cp-{epoch:04d}.ckpt')
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath = ckpt_path, save_weights_only = True,
                                                  verbose = 1, max_to_keep = 5, period = 1)
-        w2v_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback] + similarity_tests_callbacks)
-
+        train_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback] + similarity_tests_callbacks)
+    
+    # if working in GCP, upload similarity tests results
     util.upload_to_gs(sim_out_path, args.job_dir)
 
 
 if __name__ == '__main__':
     args = get_args()
-    # tf.compat.v1.logging.set_verbosity(args.verbosity)
+    assert args.mode in ['hypglove', 'glove', 'word2vec'] # TODO: do it natively with argparse module
+
+# tf.compat.v1.logging.set_verbosity(args.verbosity)
     train_model(args)

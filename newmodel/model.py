@@ -1,21 +1,12 @@
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Dot, Embedding, Input, Reshape, concatenate
+from tensorflow.keras.layers import Add, Dot, Embedding, Input, Reshape, concatenate
 
 from scipy.stats import spearmanr, pearsonr
 
-class Word2VecNEGLoss(tf.keras.losses.Loss):
-    def __init__(self, pow = 1., thresh = 100.):
-        super().__init__()
 
-    def call(self, y_pred, posneg):
-        S = tf.sigmoid(-posneg)
-        L = y_pred*(-tf.math.log(1 - S[:,0]) - tf.reduce_sum(tf.math.log(S[:, 1:]), axis = -1))
-        return tf.keras.backend.mean(L, axis = -1)
-
-
-class Word2VecModel(tf.keras.models.Model):
+class BaseModel(tf.keras.models.Model):
     def __init__(self, vocabulary_size, embedding_size, neg_samples, word2id = None, id2word = None):
         super().__init__()
         self.embedding_size = embedding_size
@@ -26,47 +17,12 @@ class Word2VecModel(tf.keras.models.Model):
         if id2word:
             self.id2word = id2word
 
-        self.loss = Word2VecNEGLoss()
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-3)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-2)
 
         self.W_embedding = Embedding(vocabulary_size, embedding_size
                                     , embeddings_initializer='normal')
         self.C_embedding = Embedding(vocabulary_size, embedding_size
                                     , embeddings_initializer='normal')
-        self.dot_layer = Dot(axes = -1)
-        self.reshape_layer1 = Reshape((1, ))
-        self.reshape_layer2 = Reshape((1+ neg_samples, ))
-
-    def call_test(self, inputs):
-        """
-        Only to make sure performance of actual model is comparable to dummy computations
-        """
-        x = self.W_embedding(inputs['target'])
-        y = self.C_embedding(inputs['pos'])
-
-        x = self.dot_layer([x, y])
-        out = self.reshape_layer1(x)
-        return out
-
-    # @tf.function(input_signature=[
-    #                               tf.TensorSpec(shape = (None, ), dtype = tf.int32, name = 'target'),
-    #                               tf.TensorSpec(shape = (None, ), dtype = tf.int32, name = 'context'),
-    #                               tf.TensorSpec(shape = (None, neg_samples), dtype = tf.int32, name = 'neg')
-    #                               ])
-    def call(self, inputs):
-        """
-        Returns an array of scalar products and embeddings of positive/negative samples
-        """
-        pos = self.reshape_layer1(inputs['pos'])
-        pn = concatenate([pos, inputs['neg']], axis = -1)
-
-        W_emb = self.W_embedding(inputs['target'])
-        C_pn = self.C_embedding(pn)
-
-        posneg_ = self.dot_layer([W_emb, C_pn])
-        posneg = self.reshape_layer2(posneg_)
-
-        return posneg
 
     # functions for searching closes words
     def get_embedding(self, id_or_word_array, mode = 'target'):
@@ -79,6 +35,7 @@ class Word2VecModel(tf.keras.models.Model):
             id_array = np.array([self.word2ids[w] for w in id_or_word_array], dtype = np.int32)
         return self.W_embedding(id_array) if mode == 'target' else self.C_embedding(id_array)
 
+    # EDIK: All below is subject to revision -- common methods for models. Defined here even if some of them can be overwritten/amended for specific models
     # TODO: put 'normalize_rows' in utils
     def normalize_rows(self, sample_emb):
         return sample_emb/tf.sqrt(tf.reduce_sum(tf.square(sample_emb), axis = 1, keepdims = True))
@@ -230,3 +187,84 @@ class Word2VecModel(tf.keras.models.Model):
                 res[match][1]+= oov
                 res[match][2]+= tot
         return res
+
+
+
+
+# Word2Vec model with NEG loss
+class Word2VecNEGLoss(tf.keras.losses.Loss):
+    def __init__(self, pow = 1., thresh = 100.):
+        super().__init__()
+
+    def call(self, y_true, posneg):
+        S = tf.sigmoid(-posneg)
+        L = y_true*(-tf.math.log(1 - S[:,0]) - tf.reduce_sum(tf.math.log(S[:, 1:]), axis = -1))
+        return tf.keras.backend.mean(L, axis = -1)
+
+
+class Word2VecModel(BaseModel):
+    def __init__(self, vocabulary_size, embedding_size, neg_samples, word2id = None, id2word = None):
+        super().__init__(vocabulary_size, embedding_size, neg_samples, word2id = word2id, id2word = id2word)
+
+        # model specific part         
+        self.loss = Word2VecNEGLoss()
+
+        self.dot_layer = Dot(axes = -1)
+        self.reshape_layer1 = Reshape((1, ))
+        self.reshape_layer2 = Reshape((1+ neg_samples, ))
+
+
+    def call(self, inputs):
+        """
+        Returns an array of scalar products and embeddings of positive/negative samples
+        """
+        pos = self.reshape_layer1(inputs['pos'])
+        pn = concatenate([pos, inputs['neg']], axis = -1)
+
+        W_emb = self.W_embedding(inputs['target'])
+        C_pn = self.C_embedding(pn)
+
+        posneg_ = self.dot_layer([W_emb, C_pn])
+        posneg = self.reshape_layer2(posneg_)
+
+        return posneg
+
+
+# Glove Model
+class GloveLoss(tf.keras.losses.Loss):
+    def __init__(self, pow = 1., thresh = 100.):
+        super().__init__()
+
+    # REQUIRED CHANGE
+    def call(self, y_true, y_pred): # note that y_pred is already capped and powered
+        L = y_true*tf.square(y_pred - tf.math.log(y_true))
+        return tf.keras.backend.mean(L, axis = -1)
+
+class GloveModel(BaseModel):
+    def __init__(self, vocabulary_size, embedding_size, neg_samples, word2id = None, id2word = None):
+        super().__init__(vocabulary_size, embedding_size, neg_samples, word2id = word2id, id2word = id2word)
+
+        # model specific part         
+        self.loss = GloveLoss()
+
+        self.target_bias = Embedding(vocabulary_size, 1, input_length=1, name='target_bias')
+        self.context_bias = Embedding(vocabulary_size, 1, input_length=1, name='context_bias')
+
+        self.dot_layer = Dot(axes = -1)
+        self.add_layer = Add()
+        self.reshape_layer = Reshape((1, ))
+
+
+    def call(self, inputs):
+        """
+        Returns an array of scalar products and embeddings of positive/negative samples
+        """
+        w_target = self.W_embedding(inputs['target'])
+        w_context = self.C_embedding(inputs['pos'])
+        b_target = self.target_bias(inputs['target'])
+        b_context = self.context_bias(inputs['pos'])
+
+        dotted = self.dot_layer([w_target, w_context])
+        pred = self.add_layer([dotted, b_context, b_target])
+
+        return self.reshape_layer(pred)

@@ -277,7 +277,6 @@ def load_raw_data(corpus_name, job_dir, perl_cleanup = True, n_splits = None):
     if not makes it available.
     Returns a list containing a single path to file processed file.
     """
-    # TODO: make sure this works for both perl_cleanup values
     text_file_name = f'{corpus_name}.txt'
     text_file_path = os.path.join(job_dir, 'model_data', text_file_name)
 
@@ -375,14 +374,14 @@ def skips_to_counter(skips):
     return res_counter
 
 
-
 def postprocess_count_skips(skips, count_threshold = 0):
-    if count_threshold > 0:
-        return np.array([[k, i, j] for (i, j), k in skips.items() if k >= count_threshold], dtype = np.float32)
-    return np.array([[k, i, j] for (i, j), k in skips.items()], dtype = np.float32)
+    if count_threshold > 0: # note that orders are guaranteed to match
+        return (np.array([k for k, v in skips.items() if v >= count_threshold], dtype = np.int32),
+                np.array([v for v in skips.values() if v >= count_threshold], dtype = np.float32))
+    return (np.array(list(skips.keys()), dtype = np.int32), np.array(list(skips.values()), dtype = np.float32))
 
 
-def count_skips(id_array, skip_window=5, counter_format = False):
+def count_skips(id_array, skip_window=5, counter_format = False, count_threshold = 0):
     def mirror(d):
         mirror_d = {}
         for (i, j), k in tqdm(d.items()):
@@ -390,7 +389,7 @@ def count_skips(id_array, skip_window=5, counter_format = False):
                 mirror_d[(j, i)] = k
         return mirror_d
 
-    print(f'Processing skips of length {len(id_array)}')
+    print(f'Processing skips for a text of length {len(id_array)}')
     d = dict()
     corpus_len = len(id_array)
     assert corpus_len >= skip_window
@@ -411,14 +410,9 @@ def count_skips(id_array, skip_window=5, counter_format = False):
           d[(i,j)]= d.get((i,j),0) + 1./(ind + 1)
 
     if counter_format:
-        # mirror_d = mirror(d)
-        # return d.update(mirror_d)
         return d
     else:
-        # res = postprocess_count_skips(d)
-        # # concatenate with mirror version
-        # return np.concatenate([res, res[np.where(res[:,1]!=res[:,2])][:,[0,2,1]]], axis = 0)
-        return postprocess_count_skips(d)
+        return postprocess_count_skips(d, count_threshold=count_threshold)
 
 
 def get_chunk_thresholds(arr, n_chunks):
@@ -443,6 +437,48 @@ def get_chunk_thresholds(arr, n_chunks):
 
     chunk_thresholds += [N]*(n_chunks - 1)
     return chunk_thresholds
+
+
+def shuffle_stored_batches(file_path,  stored_batch_size = None):
+    def data_generator(data_memmap):
+        return iter(data_memmap)
+
+    if file_path[:5] == 'gs://':
+        file_path = download_from_gs(file_path)
+
+    # get shape
+    with open(file_path + '_val.npy', 'rb') as npy:
+        np.lib.format.read_magic(npy)
+        shp, _, _ = np.lib.format.read_array_header_1_0(npy)
+
+    # allocate memory
+    if stored_batch_size:
+        assert shp[1] == stored_batch_size
+    else:
+        stored_batch_size = shp[1]
+    res_key = np.empty((shp[0], shp[1], 2), dtype = np.int32)
+    res_val = np.empty(shp, dtype = np.float32)
+
+    shuffle_dataset_key = tf.data.Dataset.from_generator(
+        generator=data_generator,
+        args = [np.load(file_path + '_key.npy', mmap_mode='r')],
+        output_types=np.int32,
+        output_shapes=(stored_batch_size, 2)).unbatch().shuffle(100000).batch(stored_batch_size)
+
+    shuffle_dataset_val = tf.data.Dataset.from_generator(
+        generator=data_generator,
+        args = [np.load(file_path + '_val.npy', mmap_mode='r')],
+        output_types=np.float32,
+        output_shapes=(stored_batch_size,)).unbatch().shuffle(100000).batch(stored_batch_size)
+
+    shuffle_dataset = tf.data.Dataset.zip((shuffle_dataset_key, shuffle_dataset_val))
+    for i, (batch_key, batch_val) in enumerate(shuffle_dataset):
+        b = batch_key.shape[0]
+        res_key[i] = batch_key
+        res_val[i] = batch_val
+    
+    np.save(file_path + '_key.npy', res_key)
+    np.save(file_path + '_val.npy', res_val)
 
 
 def load_dict(path):
@@ -480,17 +516,26 @@ def update_store_chunks(skips_upd, chunk_thresholds, new_cache_path, old_cache_p
 
 
 def collect_skips(cache_path, chunk_thresholds, count_threshold = .5):
-    skips = np.zeros(shape = (0,3), dtype = np.float32)
+    skips_key = np.zeros(shape = (0,2), dtype = np.int32)
+    skips_val = np.zeros(shape = (0,), dtype = np.float32)
     for c0, c1 in zip(chunk_thresholds[:-1], chunk_thresholds[1:]):
         chunk_name = f'{cache_path}_{c0}_{c1}.pkl'
         chunk = load_dict(chunk_name)
+        chunk_key, chunk_val = postprocess_count_skips(chunk, count_threshold=count_threshold)
 
-        skips = np.concatenate([skips, postprocess_count_skips(chunk, count_threshold=count_threshold)], axis = 0)
-    return skips
+        skips_key = np.concatenate([skips_key, chunk_key], axis = 0)
+        skips_val = np.concatenate([skips_val, chunk_val], axis = 0)
+    return (skips_key, skips_val)
+
+
+def append_mirror(skips):
+    # skips are not batched
+    inds = np.where(skips[0][:,0]!=skips[0][:,1])
+    return (np.concatenate([skips[0], skips[0][inds][:, [1, 0]]], axis = 0), np.concatenate([skips[1], skips[1][inds]], axis = 0))
 
 
 def get_word_stats(text_file_paths, max_vocabulary_size, min_occurrence):
-    # TODO: heresy
+    # TODO: heresy -- this should nicely interact with load_process_data to store meta before and not after counting skips
     found_meta = False
     if text_file_paths[0][:5] == 'gs://':
         bucket_name, path_name = split_gs_prefix(text_file_paths[0])
@@ -547,10 +592,10 @@ def get_word_stats(text_file_paths, max_vocabulary_size, min_occurrence):
         if text_file_paths[0][:5] == 'gs://':
             bucket_name, _ = split_gs_prefix(text_file_paths[0])
             record_corpus_metadata(word2id, word_counts, os.path.join(bucket_name, 'new_w2v_model/model_data/meta_full_v1.tsv'))
-            print('Finicky job with metadata is done!')
+            print('Recorded temporary meta for the full corpus')
         else:
             record_corpus_metadata(word2id, word_counts, os.path.join('model_data', 'meta_full_v1.tsv'))
-            print('Finicky job with metadata is done!')
+            print('Recorded temporary meta for the full corpus')
 
     # word_array = None if len(text_file_paths) > 1 else word_array
     return word2id, id2word, word_counts, id_counts
@@ -572,12 +617,12 @@ def preprocess_data_mult(text_file_paths, max_vocabulary_size, min_occurrence, s
     print('Counting skips. It may take some time...')
     if len(text_file_paths) == 1: # word_array was kept so far
         if text_file_paths[0][:5] == 'gs://':
-            _, text_file_paths[0] = split_gs_prefix(text_file_paths[0])
+            text_file_paths[0] = download_from_gs(text_file_paths[0])
 
         with open(text_file_paths[0]) as text_file:
             word_array = tf.keras.preprocessing.text.text_to_word_sequence(text_file.readline())
         id_array = list(map(lambda x: word2id.get(x, 0), word_array))
-        skips = count_skips(id_array, skip_window)
+        skips = count_skips(id_array, skip_window, count_threshold=.5)
     else:
 
         # Step 1: Process text files into chunks
@@ -621,7 +666,7 @@ def preprocess_data_mult(text_file_paths, max_vocabulary_size, min_occurrence, s
                 id_array = list(map(lambda x: word2id.get(x, 0), word_array))
 
             print(f'Counting skips for {os.path.basename(path_name)}')
-            skips_upd = count_skips(id_array, skip_window, counter_format=True)
+            skips_upd = count_skips(id_array, skip_window, counter_format=True) # note: no count_threshold
             if not chunk_thresholds:
                 # CHUNKS HERE
                 chunk_thresholds = [0] + get_chunk_thresholds([i for (i, j) in skips_upd.keys()], n_chunks = 4) + [len(word2id)]
@@ -645,7 +690,7 @@ def preprocess_data_mult(text_file_paths, max_vocabulary_size, min_occurrence, s
         skips = collect_skips(new_cache_path, chunk_thresholds, count_threshold = .5)
         print('Celaning up cache files')
         for cache_path in all_caches:
-            for file_name in os.listdir(os.dirname(cache_path)):
+            for file_name in os.listdir(os.path.dirname(cache_path)):
                 if file_name.find(cache_path) >= 0:
                     os.remove(file_name)
 
@@ -707,8 +752,8 @@ def read_corpus_metadata(meta_file_path):
     return word2id, id2word, word_counts, id_counts
 
 
+# CHANGES HERE
 def load_process_data(file_name, args):
-    # TODO: allow different stored batch sizes
     corpus_name = args.corpus_name
     job_dir = args.job_dir
     file_path = os.path.join(job_dir, 'model_data', file_name)
@@ -719,17 +764,17 @@ def load_process_data(file_name, args):
         client = storage.Client()
         bucket = client.get_bucket(bucket_name[5:])
 
-        if storage.Blob(bucket=bucket, name=path_name).exists(client):
-            print(f'File {file_name} already exists. Nothing to be done. Consider checking contents.')
-            # check_processed_data(file_name)
-            word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'model_data', 'meta' + file_name[6:-4] + '.tsv'))
+        if storage.Blob(bucket=bucket, name=path_name + '_key.npy').exists(client) and storage.Blob(bucket=bucket, name=path_name + '_val.npy').exists(client):
+            print(f'Key and value files for {file_name} already exist. Nothing to be done. Consider checking contents.')
+            word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'model_data', file_name + '_meta.tsv'))
             return word2id, id2word, word_counts, id_counts
-
-    elif os.path.exists(file_path):
-        print(f'File {file_name} already exists. Nothing to be done. Consider checking contents.')
-        # check_processed_data(file_name)
-        word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'model_data', 'meta' + file_name[6:-4] + '.tsv'))
+    # not Google Cloud Storage
+    elif os.path.exists(file_path + '_key.npy') and os.path.exists(file_path + '_val.npy'):
+        print(f'Key and value files for {file_name} already exist. Nothing to be done. Consider checking contents.')
+        word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'model_data', file_name + '_meta.tsv'))
         return word2id, id2word, word_counts, id_counts
+    else:
+        path_name = file_path
 
     if args.corpus_name == 'enwiki_dump':
         text_file_paths = load_dump_urls(job_dir)
@@ -737,77 +782,81 @@ def load_process_data(file_name, args):
     else:
         text_file_paths = load_raw_data(corpus_name, job_dir)
 
-
+    # count skips for each text file
     word2id, id2word, word_counts, id_counts, skips = preprocess_data_mult(text_file_paths, args.max_vocabulary_size, args.min_occurrence, args.skip_window)
-    record_corpus_metadata(word2id, word_counts, os.path.join(job_dir, 'model_data', 'meta' + file_name[6:-4] + '.tsv'))
+    record_corpus_metadata(word2id, word_counts, os.path.join(job_dir, 'model_data', file_name + '_meta.tsv'))
+    # note: this skips are not mirrored and not batched
+    skips = append_mirror(skips)
 
     # save skips in a file
     stored_batch_size = args.stored_batch_size
-    r = skips.shape[0]%stored_batch_size
+    r = 0 if len(skips[0]) % stored_batch_size == 0 else stored_batch_size - len(skips[0]) % stored_batch_size
+
+    np.save(path_name + '_key.npy', np.concatenate([skips[0], skips[0][:r]], axis = 0).reshape(-1, stored_batch_size, 2))
+    np.save(path_name + '_val.npy', np.concatenate([skips[1], skips[1][:r]], axis = 0).reshape(-1, stored_batch_size))
+
+    # shuffle in respective files (changes file contents)
+    shuffle_stored_batches(path_name, stored_batch_size = stored_batch_size)
 
     if job_dir[:5] == 'gs://':
-        np.save('temp_skips.npy', np.concatenate([skips, skips[:((stored_batch_size - r) if r!= 0 else 0),:]], axis = 0).reshape(-1, stored_batch_size, 3))
-
-        bl = bucket.blob(path_name)
-        bl.upload_from_filename(filename='temp_skips.npy')
-
-        assert storage.Blob(bucket=bucket, name=path_name).exists(client)
-        os.remove('temp_skips.npy')
-    else:
-        np.save(file_path, np.concatenate([skips, skips[:((stored_batch_size - r) if r!= 0 else 0),:]], axis = 0).reshape(-1, stored_batch_size, 3))
-
-        assert os.path.exists(file_path)
-        
-    print('Got up to here! In the outermost func!')
-    raise
-
+        upload_to_gs(path_name + '_key.npy', file_path)
+        upload_to_gs(path_name + '_val.npy', file_path)
+ 
     return word2id, id2word, word_counts, id_counts
 
-
-def create_dataset_from_stored_batches(file_path, batch_size, stored_batch_size, neg_samples, sampling_distribution, threshold, po):
+def create_dataset_from_stored_batches(file_path, batch_size, stored_batch_size, sampling_distribution, threshold, po, neg_samples):
     def data_generator(data_memmap):
         return iter(data_memmap)
 
     if file_path[:5] == 'gs://':
-        file_path = download_from_gs(file_path)
-    numpy_data_memmap = np.load(file_path, mmap_mode='r')
-    #print(f'My shape is {np.load(file_path).shape}')
+        file_path_key = download_from_gs(file_path + '_key.npy')
+        file_path_val = download_from_gs(file_path + '_val.npy')
+    else:
+        file_path_key = file_path + '_key.npy'
+        file_path_val = file_path + '_val.npy'
 
-
-    pos_dataset = tf.data.Dataset.from_generator(
+    pos_dataset_key = tf.data.Dataset.from_generator(
         generator=data_generator,
-        args = [numpy_data_memmap],
+        args = [np.load(file_path_key, mmap_mode='r')],
+        output_types=np.int32,
+        output_shapes=(stored_batch_size, 2)).unbatch().batch(batch_size)
+
+    pos_dataset_val = tf.data.Dataset.from_generator(
+        generator=data_generator,
+        args = [np.load(file_path_val, mmap_mode='r')],
         output_types=np.float32,
-        output_shapes=(stored_batch_size, 3)).unbatch().batch(batch_size)
+        output_shapes=(stored_batch_size,)).unbatch().batch(batch_size)
 
-    pos_dataset = tf.data.Dataset.from_tensor_slices(np.load(file_path)).unbatch().batch(batch_size)
+    if neg_samples: # positive number
+        # TODO: add hyperparameter for the number of stored_batch_sizes generated
+        period = 32
+        neg_rand = np.empty(dtype = np.float32, shape = (period, stored_batch_size, neg_samples))
+        def repopulate(neg_rand):
+            neg_rand[:,:,:] = np.random.choice(np.arange(sampling_distribution.shape[0], dtype = np.int32),
+                                            period*stored_batch_size*neg_samples,
+                                            p = sampling_distribution).reshape(period, stored_batch_size, neg_samples)
 
-    # TODO: add hyperparameter for the number of stored_batch_sizees generated
-    period = 32
-    neg_rand = np.empty(dtype = np.float32, shape = (period, stored_batch_size, neg_samples))
-    def repopulate(neg_rand):
-        neg_rand[:,:,:] = np.random.choice(np.arange(sampling_distribution.shape[0], dtype = np.float32),
-                                        period*stored_batch_size*neg_samples,
-                                        p = sampling_distribution).reshape(period, stored_batch_size, neg_samples)
+        def neg_data_generator(neg_rand):
+        # TODO: consider addressing resampling through explicit callbacks
+            i = 0
+            for m in neg_rand:
+                if i%period == 0:
+                    repopulate(neg_rand)
+                i+=1
+                yield m
 
-    def neg_data_generator(neg_rand):
-    # TODO: consider addressing resampling through explicit callbacks
-    # this is slightly slower than the line below
-        i = 0
-        for m in neg_rand:
-            if i%period == 0:
-                repopulate(neg_rand)
-            i+=1
-            yield m
-
-    neg_dataset = tf.data.Dataset.from_generator(
-        generator=neg_data_generator,
-        args = [neg_rand],
-        output_types=np.float32,
-        output_shapes=(stored_batch_size, neg_samples)).repeat(256*32*2**15//(stored_batch_size*period)).unbatch().batch(batch_size)
+        neg_dataset = tf.data.Dataset.from_generator(
+            generator=neg_data_generator,
+            args = [neg_rand],
+            output_types=np.int32,
+            output_shapes=(stored_batch_size, neg_samples)).repeat(256*32*2**15//(stored_batch_size*period)).unbatch().batch(batch_size)
 
 
-    pn_dataset = tf.data.Dataset.zip((pos_dataset, neg_dataset)).take(3)
+        pn_dataset = tf.data.Dataset.zip((pos_dataset_key, pos_dataset_val, neg_dataset)) 
 
-    return pn_dataset.map(lambda x, y: ({'target': x[:, 1],'pos': x[:, 2], 'neg': y}
-                                             , tf.pow(tf.clip_by_value(x[:,0]/threshold, 1., 0.), po)))
+        return pn_dataset.map(lambda key, val, neg: ({'target': key[:, 0], 'pos': key[:, 1], 'neg': neg}
+                                                , tf.pow(tf.clip_by_value(val/threshold, 1., 0.), po)))
+    else:
+        pos_dataset = tf.data.Dataset.zip((pos_dataset_key, pos_dataset_val)) 
+        return pos_dataset.map(lambda key, val: ({'target': key[:, 0], 'pos': key[:, 1]}
+                                                , tf.pow(tf.clip_by_value(val/threshold, 1., 0.), po)))
