@@ -136,7 +136,7 @@ def train_model(args):
     elif args.mode == 'word2vec':
         train_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
         train_model.compile(loss = train_model.loss, optimizer = train_model.optimizer)
-    elif args.mode = 'hypglove':
+    elif args.mode == 'hypglove':
         train_model = model.HypGloveModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
         train_model.compile(loss = train_model.loss, optimizer = train_model.optimizer)
     else:
