@@ -117,7 +117,7 @@ def train_model(args):
     # if this fails, pipeline won't work properly generating incompatible tails.
     assert args.stored_batch_size % args.batch_size == 0
 
-    word2id, id2word, word_counts, id_counts = util.load_process_data(train_file_name, args)
+    word2id, id2word, word_counts, id_counts, skips_paths = util.load_process_data(train_file_name, args, remove_zero = False)
     vocabulary_size = len(word2id)
 
     # create the dataset
@@ -127,8 +127,7 @@ def train_model(args):
     unigram = arr_counts/arr_counts.sum()
     
     neg_samples = 0 if args.mode in ['glove', 'hypglove'] else args.neg_samples
-    dataset = util.create_dataset_from_stored_batches(train_file_path, args.batch_size, args.stored_batch_size, unigram, args.threshold, args.po, neg_samples)
-
+    dataset = create_dataset_from_stored_batches(skips_paths, args.stored_batch_size, batch_size = args.batch_size, sampling_distribution = unigram, threshold = args.threshold, po = args.po, neg_samples = args.neg_samples)
     # create the model and follow additional model specific instructions (e.g. callbacks)
     if args.mode == 'glove':
         train_model = model.GloveModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
