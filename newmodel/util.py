@@ -883,7 +883,7 @@ def preprocess_data_mult(text_file_paths, max_vocabulary_size, min_occurrence, s
 
         # Step 1: Process text files into chunks
         # CHUNKS HERE
-        last_processed_file_path, chunk_thresholds = validate_chunks_processed(text_file_paths, n_chunks = 4+2)
+        last_processed_file_path, chunk_thresholds = validate_chunks_processed(text_file_paths, n_chunks = 4+4)
         text_file_paths = text_file_paths[text_file_paths.index(last_processed_file_path) + 1:] if last_processed_file_path else text_file_paths
 
         if last_processed_file_path:
@@ -899,7 +899,7 @@ def preprocess_data_mult(text_file_paths, max_vocabulary_size, min_occurrence, s
                 new_cache_path =  path_name[:-4] + '_chunk'
 
                 for c0, c1 in zip(chunk_thresholds[:-1], chunk_thresholds[1:]):
-                    chunk_path = path_name[:-4] + '_chunk_{c0}_{c1}.pkl'
+                    chunk_path = path_name[:-4] + f'_chunk_{c0}_{c1}.pkl'
                     if not os.path.exists(chunk_path):
                         download_from_gs(os.path.join(bucket_name, chunk_path))
             else:
@@ -930,8 +930,11 @@ def preprocess_data_mult(text_file_paths, max_vocabulary_size, min_occurrence, s
                 # REMOVE:
                 if len(chunk_thresholds) >= 5:
                     c0, c1 = chunk_thresholds[-2:]
-                    chunk_thresholds.insert(-1, int(2*c0/3 + c1/3))
-                    chunk_thresholds.insert(-1, int(c0/3 + 2*c1/3))
+                    chunk_thresholds.insert(-1, int(7*c0/8 + c1/8))
+                    chunk_thresholds.insert(-1, int(3*c0/4 + c1/4))
+                    chunk_thresholds.insert(-1, int(1*c0/2 + c1/2))
+                    chunk_thresholds.insert(5000)
+                    chunk_thresholds.sort()
                 print('Computed chunk thresholds:')
                 print(chunk_thresholds)
 
