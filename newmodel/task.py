@@ -111,7 +111,7 @@ def get_args():
 def train_model(args):
     # download and process data if does not exist
 
-    train_file_name = utils.normalized_train_file_name(args)
+    train_file_name = util.normalized_train_file_name(args)
     train_file_path = os.path.join(args.job_dir, 'model_data', train_file_name)
 
     # if this fails, pipeline won't work properly generating incompatible tails.
@@ -127,7 +127,7 @@ def train_model(args):
     unigram = arr_counts/arr_counts.sum()
 
     neg_samples = 0 if args.mode in ['glove', 'hypglove'] else args.neg_samples
-    dataset = utils.create_dataset_from_stored_batches(skips_paths, args.stored_batch_size, batch_size = args.batch_size, sampling_distribution = unigram, threshold = args.threshold, po = args.po, neg_samples = args.neg_samples)
+    dataset = util.create_dataset_from_stored_batches(skips_paths, args.stored_batch_size, batch_size = args.batch_size, sampling_distribution = unigram, threshold = args.threshold, po = args.po, neg_samples = args.neg_samples)
     # create the model and follow additional model specific instructions (e.g. callbacks)
     if args.mode == 'glove':
         train_model = model.GloveModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
@@ -166,7 +166,7 @@ def train_model(args):
         ckpt_path = os.path.join(args.job_dir, 'saved_models', args.save_folder, 'cp-{epoch:04d}.ckpt')
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath = ckpt_path, save_weights_only = True,
                                                  verbose = 1, max_to_keep = 5, period = 1)
-        train_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback] + similarity_tests_callbacks)
+        train_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback])# + similarity_tests_callbacks) # temporarily disabled on this branch
 
     # if working in GCP, upload similarity tests results
     util.upload_to_gs(sim_out_path, args.job_dir)

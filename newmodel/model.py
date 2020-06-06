@@ -7,7 +7,7 @@ from scipy.stats import spearmanr, pearsonr
 
 
 class BaseModel(tf.keras.models.Model):
-    def __init__(self, vocabulary_size, embedding_size, neg_samples, word2id = None, id2word = None):
+    def __init__(self, vocabulary_size, embedding_size, neg_samples, learning_rate = None, word2id = None, id2word = None):
         super().__init__()
         self.embedding_size = embedding_size
         self.vocabulary_size = vocabulary_size
@@ -17,7 +17,8 @@ class BaseModel(tf.keras.models.Model):
         if id2word:
             self.id2word = id2word
 
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate = args.learning_rate)
+        learning_rate = 1e-3 if learning_rate is None else learning_rate
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate = learning_rate)
 
         self.T_embedding = Embedding(vocabulary_size, embedding_size, embeddings_initializer='uniform')
         self.C_embedding = Embedding(vocabulary_size, embedding_size, embeddings_initializer='uniform')
@@ -491,8 +492,8 @@ class Word2VecNEGLoss(tf.keras.losses.Loss):
 
 
 class Word2VecModel(BaseModel):
-    def __init__(self, vocabulary_size, embedding_size, neg_samples, word2id = None, id2word = None):
-        super().__init__(vocabulary_size, embedding_size, neg_samples, word2id = word2id, id2word = id2word)
+    def __init__(self, vocabulary_size, embedding_size, neg_samples, learning_rate = None, word2id = None, id2word = None):
+        super().__init__(vocabulary_size, embedding_size, neg_samples, learning_rate = learning_rate, word2id = word2id, id2word = id2word)
 
         # model specific part
         self.type = 'w2v'
@@ -535,8 +536,8 @@ class GloveLoss(tf.keras.losses.Loss):
         return tf.keras.backend.mean(L, axis = -1)
 
 class GloveModel(BaseModel):
-    def __init__(self, vocabulary_size, embedding_size, neg_samples, word2id = None, id2word = None):
-        super().__init__(vocabulary_size, embedding_size, neg_samples, word2id = word2id, id2word = id2word)
+    def __init__(self, vocabulary_size, embedding_size, neg_samples, learning_rate = None, word2id = None, id2word = None):
+        super().__init__(vocabulary_size, embedding_size, neg_samples, learning_rate = learning_rate, word2id = word2id, id2word = id2word)
 
         # model specific part
         self.type = 'glove'
@@ -577,8 +578,8 @@ class GloveModel(BaseModel):
 
 
 class HypGloveModel(BaseModel):
-    def __init__(self, vocabulary_size, embedding_size, neg_samples, word2id = None, id2word = None):
-        super().__init__(vocabulary_size, embedding_size, neg_samples, word2id = word2id, id2word = id2word)
+    def __init__(self, vocabulary_size, embedding_size, neg_samples, learning_rate = None, word2id = None, id2word = None):
+        super().__init__(vocabulary_size, embedding_size, neg_samples, learning_rate = learning_rate, word2id = word2id, id2word = id2word)
 
         # model specific part
         self.type = 'hypglove'

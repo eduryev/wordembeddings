@@ -24,7 +24,7 @@ SIMILARITY_TEST_NAMES =  {
 
 
 def get_similarity_tests(job_dir):
-    tests_path = os.path.join(job_dir, 'similarity_tests')
+    tests_path = os.path.join(job_dir, 'tests/similarity_tests')
 
     if job_dir[:5] == 'gs://': # make the file available in the container
         # if tests are found in gcp bucket, overwrite local tests
@@ -105,7 +105,6 @@ def similarity_tests_callbacks(model, mode_list, metric_list, output_stat_list, 
     # create a log for each (mode, metric) pair
     for mode in mode_list:
         for metric in metric_list:
-            print(mode, metric)
 
             callback_func = callback_factory(mode, metric)
             callback = LambdaCallback(on_epoch_end = callback_func)
