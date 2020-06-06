@@ -693,3 +693,166 @@ def load_custom_model(model_path, meta_path, mode = None):
     #     return model, target, context, cooccurrence, args
     # elif mode == None:
     #     return model, dataset, args
+
+
+
+### DEMONSTRATION FUNCTIONS ###
+
+def load_dict(path):
+    with open(path,'rb') as f:
+        d = pkl.load(f)
+    return d
+
+# define custom loss function
+def custom_loss(y_true, y_pred, X_MAX = 100, a = 3.0 / 4.0):
+    return tf.keras.backend.K.sum(tf.keras.backend.K.pow(tf.keras.backend.K.clip(y_true / X_MAX, 0.0, 1.0), a) * tf.keras.backend.K.square(y_pred - tf.keras.backend.K.log(y_true)), axis=-1)
+
+def load_demo_model(model_name, job_dir = '/content/drive/My Drive/shared_project'):
+    if 'enwik9' in model_name:
+        corpus_name = 'enwik9'
+    elif 'wikidump' in model_name:
+        corpus_name = 'wikidump'
+    else:
+        raise Exception('Unknown corpus name. Has to be enwik9 or wikidump')
+    # load corpus data
+    corpus_dir = os.path.join(job_dir, 'datasets', corpus_name)
+    word2count = load_dict(corpus_dir + '/word2count.pkl')
+    word2id = load_dict(corpus_dir + '/word2id.pkl')
+    id2word = load_dict(corpus_dir + '/id2word.pkl')
+    # load model
+    model_path = os.path.join(job_dir, 'saved_weights', model_name + '.hdf5')
+    model = tf.keras.models.load_model(model_path, custom_objects={'custom_loss': custom_loss})
+    # load info
+    info_path = os.path.join(job_dir, 'saved_infos', model_name +  '_info.pkl')
+    info = load_dict(info_path)
+    return model, info, word2count, word2id, id2word
+
+def print_model_info(info):
+    print('Model name:'.ljust(30), info['model_name'])
+    print('Trained epochs:'.ljust(30), info['epochs_trained'])
+    print('Embedding dimension:'.ljust(30), info['embedding_dimension'])
+    print('Corpus name:'.ljust(30), info['corpus_name'])
+    print('Corpus length:'.ljust(30), info['corpus_length'])
+    print('Vocabulary size:'.ljust(30), info['vocab_size'])
+    print('Min word occurrence:'.ljust(30), info['min_occurrence'])
+    print('Min sentence length:'.ljust(30), info['min_sentence_length'])
+    print('Training samples:'.ljust(30), info['training_samples'])
+    print('Optimizer:'.ljust(30), info['optimizer'],'(learning rate:', info['learning_rate'], ', beta_1:', info['beta_1'],', beta_2:', info['beta_2'], ', rho:', info['rho'],')')
+    print('Batch exponent:'.ljust(30), info['batch_exponent'])
+    print('Note:'.ljust(30), info['note'])
+
+def get_embedding(model, emb_mode = 'target'):
+    if emb_mode == 'combined':
+        embedding = model.get_layer('target_embedding').get_weights()[0] + model.get_layer('context_embedding').get_weights()[0]
+    elif emb_mode == 'target':
+        embedding = model.get_layer('target_embedding').get_weights()[0]
+    elif emb_mode == 'context':
+        embedding = model.get_layer('context_embedding').get_weights()[0]
+    elif emb_mode == 'distr':
+        embedding = np.concatenate([model.get_layer('target_embedding').get_weights()[0], model.get_layer('target_sigma').get_weights()[0]], axis = -1)
+    elif emb_mode == 'eval':
+        embedding = np.concatenate([model.get_layer('target_embedding').get_weights()[0], model.get_layer('target_sigma').get_weights()[0], model.get_layer('context_embedding').get_weights()[0]], axis = -1)
+    return embedding
+
+def eucl_dist(W,V):
+    # W is array of shape (vocab_size, emb_dim), V is array of shape (k, emb_dim)
+    W_sqnorm = np.square(W).sum(axis = 1, keepdims = True)
+    V_sqnorm = np.square(V).sum(axis = 1, keepdims = True)
+    X = W_sqnorm + V_sqnorm.T - 2*np.matmul(W, V.T)
+    X[X<0] = 0
+    return np.sqrt(X)
+
+def evaluate_sim(model, vectors_1, vectors_2, metric):
+    if metric == 'cos':
+        norm_vectors_1 = vectors_1/np.sqrt(np.square(vectors_1).sum(axis = 1, keepdims = True))
+        norm_vectors_2 = vectors_2/np.sqrt(np.square(vectors_2).sum(axis = 1, keepdims = True))
+        sim = -np.matmul(norm_vectors_1, norm_vectors_2.T)
+    elif metric == 'l2':
+        sim = eucl_dist(vectors_1, vectors_2)
+    elif metric == 'fisher':
+        emb_dim = model.info['embedding_dimension']
+        assert vectors_1.shape[1] == emb_dim + 1
+        mu_emb, sigma_emb = vectors_1[:,:-1], vectors_1[:,-1:]
+        mu_vec, sigma_vec = vectors_2[:,:-1], vectors_2[:,-1:]
+        a = np.concatenate([mu_emb/np.sqrt(2*emb_dim), sigma_emb], axis = -1)
+        b = np.concatenate([mu_vec/np.sqrt(2*emb_dim), -sigma_vec], axis = -1)
+        c = np.concatenate([mu_vec/np.sqrt(2*emb_dim), sigma_vec], axis = -1)
+        d1, d2 = eucl_dist(a,b), eucl_dist(a,c)
+        sim = np.sqrt(2*emb_dim)*np.log((d1+d2)/(d1-d2))
+    return sim
+
+def get_closest(model, embedding, vectors, word_ids, n_closest, metric):
+    first_to_show = 0
+    if vectors is None:
+        assert word_ids is not None # at least one argument must be supplied
+        first_to_show = 1
+        vectors = embedding[word_ids]
+    sim = evaluate_sim(model, embedding, vectors, metric)
+    closest = np.argsort(sim, axis = 0)[first_to_show : first_to_show + n_closest, : ]
+    return closest
+
+def print_closest(model, words, n_closest = 5, emb_mode = 'combined', metric = 'cos', word2id = None, id2word = None, log_header = None):
+    embedding = get_embedding(model, emb_mode)
+    word_ids = [word2id.get(word,0) for word in words]
+    closest = get_closest(model, embedding, None, word_ids, n_closest, metric)
+    if log_header:
+        log_dir = logs_dir + model.name
+        f = open(log_dir + '/synonyms.txt', 'a+')
+        f.write(log_header + '\n')
+    for i in range(len(word_ids)):
+        log_str = f'Nearest to {id2word[word_ids[i]]}: '
+        log_str += ', '.join(list(map(id2word.get,closest[:,i])))
+        if log_header:
+            f.write(log_str + '\n')
+        else:
+            print(log_str)
+    if log_header:
+        f.write('\n\n')
+        f.close()
+
+# define hyperbolic translation
+def hyperbolic_trans(X, Y, Z):
+    Sigma_X = X[:,-1][:,np.newaxis]
+    Sigma_Y = Y[:,-1][:,np.newaxis]
+    K_X = Sigma_Y/(Sigma_Y-Sigma_X)
+    K_Y = Sigma_X/(Sigma_X-Sigma_Y)
+    Center = X*K_X + Y*K_Y
+    if np.max(np.abs(Center)) > 10**6:
+        print(np.sum(np.abs(Center) > 10**6))
+    return Center*(Sigma_X-Sigma_Y)/Sigma_X + Z*Sigma_Y/Sigma_X
+
+def solve_analogy(task, model, emb_mode, metric, hyperbolic = False, word2id = None, id2word = None):
+    embedding = get_embedding(model, emb_mode)
+    tasks = np.array([[word2id.get(word,0) for word in task]])
+    if hyperbolic:
+        analogy_vecs = hyperbolic_trans(embedding[tasks[:,0]], embedding[tasks[:,1]], embedding[tasks[:,2]])
+    else:
+        analogy_vecs = embedding[tasks[:,2]] + embedding[tasks[:,1]] - embedding[tasks[:,0]]
+    closest_ids = get_closest(model, embedding, analogy_vecs, None, 10, metric)
+    answers = []
+    for guess in closest_ids[:,0]:
+        if guess not in tasks[0] and guess != 0:
+            answers.append(id2word[guess])
+    print(f'Question: {task[0]} to {task[1]} is like {task[2]} to what?')
+    print(f'Guesses: ' + ', '.join(answers[:5]) + '.')
+
+def register_embedding(weights, word2id, log_dir) -> None:
+    if not os.path.exists(log_dir):
+        os.mkdir(log_dir)
+    # Create a checkpoint from embedding, the filename and key are
+    # name of the tensor.
+    checkpoint = tf.train.Checkpoint(embedding=weights)
+    checkpoint.save(os.path.join(log_dir, "embedding.ckpt"))
+
+    # Save Labels separately on a line-by-line manner.
+    with open(os.path.join(log_dir, 'metadata.tsv'), "w") as f:
+        for word in word2id:
+            f.write("{}\n".format(word))
+
+    # Set up config
+    config = projector.ProjectorConfig()
+    embedding = config.embeddings.add()
+    # The name of the tensor will be suffixed by `/.ATTRIBUTES/VARIABLE_VALUE`
+    embedding.tensor_name = "embedding/.ATTRIBUTES/VARIABLE_VALUE"
+    embedding.metadata_path = 'metadata.tsv'
+    projector.visualize_embeddings(log_dir, config)
