@@ -1,9 +1,15 @@
+import os
+import pickle as pkl
+from types import SimpleNamespace
 
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Add, Dot, Embedding, Input, Reshape, concatenate
+from tensorflow.keras.callbacks import LambdaCallback, ModelCheckpoint, TensorBoard
 
 from scipy.stats import spearmanr, pearsonr
+
+from newmodel.util import read_corpus_metadata
 
 
 class BaseModel(tf.keras.models.Model):
@@ -431,50 +437,50 @@ class BaseModel(tf.keras.models.Model):
 
         # checkpoint
         # save_callback = LambdaCallback(on_epoch_end=lambda epoch, logs: self.save_custom_model(epoch, args))
-        callbacks+= self.get_save_callbacks(save_path, args)
+        callbacks+= self.get_save_callbacks(args.save_path, args)
 
         # tensorboard
-        callbacks.append(TensorBoard(log_dir, histogram_freq = 0))
+        tensorboard_callback = TensorBoard(log_dir, histogram_freq = 0)
         # histogram
-        # histogram_callback = LambdaCallback(on_epoch_end=lambda epoch, logs: self.histogram_scalar(epoch))
-        # # loss
-        # loss_callback = LambdaCallback(on_epoch_end=lambda epoch, logs: self.loss_scalar(epoch, logs))
-        # # put in callbacks
-        # callbacks = [tensorboard_callback, save_callback, histogram_callback, loss_callback]
-        # # synonyms
-        # syn_words = ['three','third','russian','cold','sweet','large','poor','dog','tree','book','country','football','human','universe','life','love','liberty','health','faith','progress','history','cowardice','hyperbole','clandestine','serendipity']
-        # synonym_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.print_closest(syn_words, 9, 'context', 'cos',
-        #                                                             log_header = f'Epoch {epoch+1}') if (epoch+1)%5==0 else None)
-        # # analogy
-        # analogy_combined_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.analogy_scalar(epoch, 'combined', 'cos'))
-        # analogy_target_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.analogy_scalar(epoch, 'target', 'cos'))
-        # analogy_context_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.analogy_scalar(epoch, 'context', 'cos'))
-        # analogy_callbacks = [analogy_combined_cos_callback, analogy_target_cos_callback, analogy_context_cos_callback]
-        # # similarity
-        # sim_combined_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'combined', 'cos'))
-        # sim_target_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'target', 'cos'))
-        # sim_context_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'context', 'cos'))
-        # sim_combined_l2_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'combined', 'l2'))
-        # sim_target_l2_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'target', 'l2'))
-        # sim_context_l2_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'context', 'l2'))
-        # similarity_callbacks = [sim_combined_cos_callback, sim_combined_l2_callback, sim_target_cos_callback,
-        #                         sim_target_l2_callback, sim_context_cos_callback, sim_context_l2_callback]
-        # #similarity_callbacks = [sim_combined_cos_callback, sim_target_cos_callback]
-        # # extra analogy and similarity for hypglove
-        # if self.type == 'hypglove':
-        #     # analogy for hypglove
-        #     analogy_distr_fisher_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.analogy_scalar(epoch, 'distr', 'fisher', False))
-        #     analogy_distr_fisher_hyp_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.analogy_scalar(epoch, 'distr', 'fisher', True))
-        #     analogy_callbacks += [analogy_distr_fisher_callback, analogy_distr_fisher_hyp_callback]
-        #     # similarity for hypglove
-        #     sim_distr_fisher_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'distr', 'fisher'))
-        #     similarity_callbacks += [sim_distr_fisher_callback]
-        # if similarity:
-        #     callbacks += similarity_callbacks
-        # if analogy:
-        #     callbacks += analogy_callbacks
-        # if synonym:
-        #     callbacks += [synonym_callback]
+        histogram_callback = LambdaCallback(on_epoch_end=lambda epoch, logs: self.histogram_scalar(epoch))
+        # loss
+        loss_callback = LambdaCallback(on_epoch_end=lambda epoch, logs: self.loss_scalar(epoch, logs))
+        # put in callbacks
+        callbacks += [tensorboard_callback, histogram_callback, loss_callback]
+        # synonyms
+        syn_words = ['three','third','russian','cold','sweet','large','poor','dog','tree','book','country','football','human','universe','life','love','liberty','health','faith','progress','history','cowardice','hyperbole','clandestine','serendipity']
+        synonym_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.print_closest(syn_words, 9, 'context', 'cos',
+                                                                    log_header = f'Epoch {epoch+1}') if (epoch+1)%5==0 else None)
+        # analogy
+        analogy_combined_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.analogy_scalar(epoch, 'combined', 'cos'))
+        analogy_target_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.analogy_scalar(epoch, 'target', 'cos'))
+        analogy_context_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.analogy_scalar(epoch, 'context', 'cos'))
+        analogy_callbacks = [analogy_combined_cos_callback, analogy_target_cos_callback, analogy_context_cos_callback]
+        # similarity
+        sim_combined_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'combined', 'cos'))
+        sim_target_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'target', 'cos'))
+        sim_context_cos_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'context', 'cos'))
+        sim_combined_l2_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'combined', 'l2'))
+        sim_target_l2_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'target', 'l2'))
+        sim_context_l2_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'context', 'l2'))
+        similarity_callbacks = [sim_combined_cos_callback, sim_combined_l2_callback, sim_target_cos_callback,
+                                sim_target_l2_callback, sim_context_cos_callback, sim_context_l2_callback]
+        #similarity_callbacks = [sim_combined_cos_callback, sim_target_cos_callback]
+        # extra analogy and similarity for hypglove
+        if self.type == 'hypglove':
+            # analogy for hypglove
+            analogy_distr_fisher_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.analogy_scalar(epoch, 'distr', 'fisher', False))
+            analogy_distr_fisher_hyp_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.analogy_scalar(epoch, 'distr', 'fisher', True))
+            analogy_callbacks += [analogy_distr_fisher_callback, analogy_distr_fisher_hyp_callback]
+            # similarity for hypglove
+            sim_distr_fisher_callback = LambdaCallback(on_epoch_end=lambda epoch,logs: self.similarity_scalar(epoch, 'distr', 'fisher'))
+            similarity_callbacks += [sim_distr_fisher_callback]
+        if similarity:
+            callbacks += similarity_callbacks
+        if analogy:
+            callbacks += analogy_callbacks
+        if synonym:
+            callbacks += [synonym_callback]
         return callbacks
 
 
@@ -655,13 +661,15 @@ def load_custom_model(model_path, meta_path, mode = None):
     #     unigram = arr_counts/arr_counts.sum()
     #     dataset = create_dataset_from_stored_batches(train_file_path, args.batch_size, args.stored_batch_size, unigram, args.threshold, args.po, neg_samples = args.neg_samples)
     # # create model
+
+    model_name = os.path.basename(model_path)
     if mode is None:
         mode = model_name.split('_')[0]
     print(f'Creating new {mode} model instance...')
 
     # TODO: make sure those are accessible
     class_dict = {'w2v': Word2VecModel, 'glove': GloveModel, 'hypglove': HypGloveModel}
-    model = class_dict[mode](vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
+    model = class_dict[mode](vocabulary_size, args_.embedding_size, args_.neg_samples, learning_rate = args_.learning_rate, word2id = word2id, id2word = id2word)
     args_, epochs_trained_ =  model.load_model(model_path)
 
     return model, args_, epochs_trained_

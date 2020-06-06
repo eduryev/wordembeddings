@@ -161,12 +161,12 @@ def train_model(args):
         args.save_folder = args.restore_folder
 
     if args.save_folder is None:
-        train_model.fit(dataset, epochs = args.num_epochs, callbacks = similarity_tests_callbacks)
+        train_model.fit(dataset, epochs = args.num_epochs)#, callbacks = similarity_tests_callbacks) # temporarily disabled on presentation branch
     else:
         ckpt_path = os.path.join(args.job_dir, 'saved_models', args.save_folder, 'cp-{epoch:04d}.ckpt')
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath = ckpt_path, save_weights_only = True,
                                                  verbose = 1, max_to_keep = 5, period = 1)
-        train_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback])# + similarity_tests_callbacks) # temporarily disabled on this branch
+        train_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback])# + similarity_tests_callbacks) # temporarily disabled on presentation branch
 
     # if working in GCP, upload similarity tests results
     util.upload_to_gs(sim_out_path, args.job_dir)
