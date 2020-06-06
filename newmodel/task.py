@@ -111,7 +111,7 @@ def get_args():
 def train_model(args):
     # download and process data if does not exist
 
-    train_file_name = 'stored_{corpus_name}_maxsize_{max_vocabulary_size}_minocc_{min_occurrence}_window_{skip_window}_storedbatch_{stored_batch_size}'.format(**args.__dict__)
+    train_file_name = utils.normalized_train_file_name(args)
     train_file_path = os.path.join(args.job_dir, 'model_data', train_file_name)
 
     # if this fails, pipeline won't work properly generating incompatible tails.
@@ -125,9 +125,9 @@ def train_model(args):
     arr_counts = np.array([id_counts[i] for i in range(len(id2word))], dtype = np.float32)
     arr_counts[:] = arr_counts**args.po
     unigram = arr_counts/arr_counts.sum()
-    
+
     neg_samples = 0 if args.mode in ['glove', 'hypglove'] else args.neg_samples
-    dataset = create_dataset_from_stored_batches(skips_paths, args.stored_batch_size, batch_size = args.batch_size, sampling_distribution = unigram, threshold = args.threshold, po = args.po, neg_samples = args.neg_samples)
+    dataset = utils.create_dataset_from_stored_batches(skips_paths, args.stored_batch_size, batch_size = args.batch_size, sampling_distribution = unigram, threshold = args.threshold, po = args.po, neg_samples = args.neg_samples)
     # create the model and follow additional model specific instructions (e.g. callbacks)
     if args.mode == 'glove':
         train_model = model.GloveModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
@@ -167,7 +167,7 @@ def train_model(args):
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath = ckpt_path, save_weights_only = True,
                                                  verbose = 1, max_to_keep = 5, period = 1)
         train_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback] + similarity_tests_callbacks)
-    
+
     # if working in GCP, upload similarity tests results
     util.upload_to_gs(sim_out_path, args.job_dir)
 
