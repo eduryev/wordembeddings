@@ -41,17 +41,17 @@ def get_args():
         default = 'logs',
         help='Subfolder with checkpoints to restore the model from')
     parser.add_argument(
-        '--restore-folder',
+        '--restore-dir',
         type=str,
         required=False,
         default = None,
-        help='Subfolder with checkpoints to restore the model from')
+        help='Directory in `job_dir` with checkpoints to restore the model from')
     parser.add_argument(
-        '--save-folder',
+        '--save-dir',
         type=str,
         required=False,
         default=None,
-        help='Subfolder to store model results')
+        help='Directory in `job_dir` to store model results')
     parser.add_argument(
         '--num-epochs',
         type=int,
@@ -111,7 +111,7 @@ def get_args():
 def train_model(args):
     # download and process data if does not exist
 
-    train_file_name = 'stored_{corpus_name}_maxsize_{max_vocabulary_size}_minocc_{min_occurrence}_window_{skip_window}_storedbatch_{stored_batch_size}'.format(**args.__dict__)
+    train_file_name = train_file_name = util.normalized_train_file_name(args)
     train_file_path = os.path.join(args.job_dir, 'model_data', train_file_name)
 
     # if this fails, pipeline won't work properly generating incompatible tails.
@@ -121,13 +121,16 @@ def train_model(args):
     vocabulary_size = len(word2id)
 
     # create the dataset
-    # TODO: Note this power is different in principle
-    arr_counts = np.array([id_counts[i] for i in range(len(id2word))], dtype = np.float32)
-    arr_counts[:] = arr_counts**args.po
-    unigram = arr_counts/arr_counts.sum()
-    
     neg_samples = 0 if args.mode in ['glove', 'hypglove'] else args.neg_samples
-    dataset = create_dataset_from_stored_batches(skips_paths, args.stored_batch_size, batch_size = args.batch_size, sampling_distribution = unigram, threshold = args.threshold, po = args.po, neg_samples = args.neg_samples)
+    if args.neg_samples > 0:
+        arr_counts = np.array([id_counts[i] for i in range(len(id2word))], dtype = np.float32)
+        # TODO: Note this power is different in principle
+        arr_counts[:] = arr_counts**args.po
+        unigram = arr_counts/arr_counts.sum()
+    else:
+        unigram = None
+
+    dataset = util.create_dataset_from_stored_batches(skips_paths, args.stored_batch_size, batch_size = args.batch_size, sampling_distribution = unigram, threshold = args.threshold, po = args.po, neg_samples = args.neg_samples)
     # create the model and follow additional model specific instructions (e.g. callbacks)
     if args.mode == 'glove':
         train_model = model.GloveModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
@@ -141,35 +144,40 @@ def train_model(args):
     else:
         raise NotImplementedError
 
-    # EDIK: these callbacks need to be reworked, see tests.py if you want to reuse anything
-    # prepare tests and callbacks
+    callbacks = []
+
+    # similarity callbacks
     similarity_tests_dict = tests.get_similarity_tests(args.job_dir)
     print('Found following similarity tests:')
     print(similarity_tests_dict)
-    sim_out_file = 'sim_tests_' + datetime.datetime.now().strftime("%y%m%d_%H%M%S") + '.tsv'
-    similarity_tests_callbacks, sim_out_path = tests.similarity_tests_callbacks(train_model, ['target', 'context'], ['l2', 'cos'], ['spearman', 'pearson'], similarity_tests_dict, args.job_dir, out_file = sim_out_file)
+    if len(similarity_tests_dict) > 0:
+        similarity_callbacks = train_model.get_similarity_tests_callbacks(similarity_tests_dict, ['target', 'context'], ['l2', 'cos'], args.job_dir, args.log_dir)
+    else:
+        similarity_tests_callbacks = []
+
+    callbacks+= similarity_tests_callbacks
 
     # if restore-path is given restore the model
-    if args.restore_folder is not None:
-        restore_path = os.path.join(args.job_dir, 'saved_models', args.restore_folder)
+    if args.restore_dir is not None:
+        restore_path = os.path.join(args.job_dir, 'saved_models', args.restore_dir)
         print(f'Restoring model weights from {restore_path}')
-        latest = tf.train.latest_checkpoint(restore_path)
-        train_model.load_weights(latest)
+        _, epochs_trained_ = train_model.load_model(os.path.join(args.job_dir, 'saved_models', args.restore_dir))
+        #train_model.load_weights(latest)
+    else:
+        epochs_trained_ = 0
 
     # train the model
-    if args.save_folder is None: # save to restore_folder unless instructed otherwise
-        args.save_folder = args.restore_folder
+    if args.save_dir is None: # save to restore_dir unless instructed otherwise
+        args.save_dir = args.restore_dir
+    if args.save_dir:
+        save_path = os.path.join(args.job_dir, 'saved_models' , args.save_dir)
+        callbacks+= train_model.get_save_callbacks(save_path, args, period = 5)
 
-    if args.save_folder is None:
-        train_model.fit(dataset, epochs = args.num_epochs, callbacks = similarity_tests_callbacks)
-    else:
-        ckpt_path = os.path.join(args.job_dir, 'saved_models', args.save_folder, 'cp-{epoch:04d}.ckpt')
-        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath = ckpt_path, save_weights_only = True,
-                                                 verbose = 1, max_to_keep = 5, period = 1)
-        train_model.fit(dataset, epochs = args.num_epochs, callbacks = [cp_callback] + similarity_tests_callbacks)
-    
+    train_model.fit(dataset, epochs = args.num_epochs, callbacks = callbacks, initial_epoch = epochs_trained_)
+
     # if working in GCP, upload similarity tests results
-    util.upload_to_gs(sim_out_path, args.job_dir)
+    if len(similarity_tests_callbacks) > 0:
+        util.upload_to_gs(sim_out_path, args.job_dir)
 
 
 if __name__ == '__main__':
