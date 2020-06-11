@@ -24,7 +24,7 @@ SIMILARITY_TEST_NAMES =  {
 
 
 def get_similarity_tests(job_dir):
-    tests_path = os.path.join(job_dir, 'similarity_tests')
+    tests_path = os.path.join(job_dir, 'tests/similarity_tests')
 
     if job_dir[:5] == 'gs://': # make the file available in the container
         # if tests are found in gcp bucket, overwrite local tests
@@ -55,57 +55,9 @@ def get_similarity_tests(job_dir):
     return tests_dict
 
 
-# TODO: use decorators to compose callback_func
-# TODO: pair pearson and spearman to avoid computation duplication
-def similarity_tests_callbacks(model, mode_list, metric_list, output_stat_list, tests_dict, job_dir, out_file = None):
-    callback_list = []
-    log_dir = os.path.join(job_dir, 'logs')
-
-    if out_file:
-        if log_dir[:5] == 'gs://':
-            bucket_name, loc_path = util.split_gs_prefix(log_dir)
-            out_path = os.path.join(loc_path, out_file)
-        else:
-            out_path = os.path.join(log_dir, out_file)
-        if not os.path.exists(os.path.dirname(out_path)):
-            os.makedirs(os.path.dirname(out_path), exist_ok = True)
-        with open(out_path, 'w+') as out:
-            out.write('#test_name\t')
-            for output_stat in output_stat_list:
-                out.write(output_stat + '\t')
-            out.write('oov_pct\n')
-    else:
-        out_path = None
-
-    def callback_factory(mode, metric):
-        def callback_func(epoch, logs):
-            file_writer = summary.create_file_writer(os.path.join(log_dir, f'metrics/{mode}_{metric}'))
-            file_writer.set_as_default()
-
-            for test_name, test_path in tests_dict.items():
-                if out_path:
-                    with open(out_path, 'a') as out:
-                        out.write(test_name + '\t')
-
-                # separate summary for each test and stat
-                for output_stat in output_stat_list:
-                    res = model.similarity_test(test_path, mode=mode, metric=metric, output_stat=output_stat)
-                    summary.scalar(test_name + '_' + output_stat, data = res[0], step = epoch)
-
-                    if out_path: # record stat
-                        with open(out_path, 'a') as out:
-                            out.write('{0:.5f}\t'.format(res[0]))
-
-                if out_path: # record oov_pct
-                    with open(out_path, 'a') as out:
-                        out.write('{0:.5f}\n'.format(res[-1]))
-        return callback_func
-
-
     # create a log for each (mode, metric) pair
     for mode in mode_list:
         for metric in metric_list:
-            print(mode, metric)
 
             callback_func = callback_factory(mode, metric)
             callback = LambdaCallback(on_epoch_end = callback_func)

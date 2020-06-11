@@ -95,7 +95,7 @@ def load_unpack_zip(corpus_name, job_dir, n_splits = None):
             link = urllib.request.urlopen(url)
             bl = bucket.blob(path_name)
             bl.upload_from_string(link.read())
-        
+
         # unpack from Google Cloud Storage
         bl = bucket.blob(path_name)
         zipbytes = io.BytesIO(bl.download_as_string())
@@ -487,7 +487,7 @@ def validate_chunks_processed(text_file_paths, n_chunks):
             file_list = [os.path.basename(bl.name) for bl in bucket.list_blobs(prefix=path_name[:-4] + '_chunk')]
         else:
             file_list = list(filter(
-                lambda file_name: file_name.find(os.path.basename(text_file_path[:-4]) + '_chunk') == 0, 
+                lambda file_name: file_name.find(os.path.basename(text_file_path[:-4]) + '_chunk') == 0,
                 os.listdir(os.path.dirname(text_file_path))))
 
         chunk_thresholds = []
@@ -502,7 +502,7 @@ def validate_chunks_processed(text_file_paths, n_chunks):
             print(f'Found processed file {os.path.basename(text_file_path)}')
             last_processed_file_path = text_file_path
             break
-        
+
     return last_processed_file_path, chunk_thresholds
 
 
@@ -564,7 +564,7 @@ def collect_skips(cache_path, chunk_thresholds, count_threshold = .5):
 
         del chunk
         gc.collect()
-        
+
         skips_key = np.concatenate([skips_key, chunk_key], axis = 0)
         skips_val = np.concatenate([skips_val, chunk_val], axis = 0)
 
@@ -574,7 +574,7 @@ def collect_skips(cache_path, chunk_thresholds, count_threshold = .5):
     return (skips_key, skips_val)
 
 
-def shuffle_stored_batches(file_paths, stored_batch_size = None):    
+def shuffle_stored_batches(file_paths, stored_batch_size = None):
     if not isinstance(file_paths, list):
         file_paths = [file_paths]
 
@@ -596,7 +596,7 @@ def shuffle_stored_batches(file_paths, stored_batch_size = None):
             assert shp[1] == stored_batch_size
         else:
             stored_batch_size = shp[1]
-    
+
     pos_dataset = pos_dataset.shuffle(100000).batch(stored_batch_size)
 
     cur_shp = shps.pop(0) # next trheshold
@@ -631,7 +631,7 @@ def shuffle_stored_batches(file_paths, stored_batch_size = None):
         os.rename(path_name + '_val_shuffled.npy', path_name + '_val.npy')
         if file_path[:5] == 'gs://':
             upload_to_gs(path_name, file_path)
-    
+
 
 def load_dict(path):
   with open(path,'rb') as f:
@@ -717,7 +717,7 @@ def record_skips(skips, store_path, stored_batch_size, max_store_size = None, st
             tmp_val[c] = k
             c+= 1
             c, f, last_used = save_if_full(c, f, last_used)
-     
+
     if store_tail:
         if c != 0:
             r = stored_batch_size - c%stored_batch_size
@@ -743,7 +743,7 @@ def record_skips(skips, store_path, stored_batch_size, max_store_size = None, st
 
     if store_path[:5] == 'gs://':
         for skips_path in skips_paths:
-            assert os.path.exists(skips_path + '_key.npy') and os.path.exists(skips_path + '_val.npy') 
+            assert os.path.exists(skips_path + '_key.npy') and os.path.exists(skips_path + '_val.npy')
             upload_to_gs(skips_path + '_key.npy', store_path)
             upload_to_gs(skips_path + '_val.npy', store_path)
 
@@ -774,7 +774,7 @@ def record_skips_from_dicts(store_path, cache_path, chunk_thresholds, stored_bat
             skips_paths_, _, _ = record_skips(skips, store_path, stored_batch_size, max_store_size = max_store_size, store_tail = True, prev_data = prev_data, last_mirror_skip = last_mirror_skip, first_skips_ind = len(skips_paths), remove_zero = remove_zero)
             skips_paths += skips_paths_
         else:
-            skips_paths_, n_rem, last_mirror_skip =  record_skips(skips, store_path, stored_batch_size, max_store_size = max_store_size, store_tail = False, prev_data = prev_data, last_mirror_skip = last_mirror_skip, first_skips_ind = len(skips_paths), remove_zero = remove_zero) 
+            skips_paths_, n_rem, last_mirror_skip =  record_skips(skips, store_path, stored_batch_size, max_store_size = max_store_size, store_tail = False, prev_data = prev_data, last_mirror_skip = last_mirror_skip, first_skips_ind = len(skips_paths), remove_zero = remove_zero)
             skips_paths += skips_paths_
             prev_data = (skips[0][-n_rem:], skips[1][-n_rem:])
         del skips
@@ -870,7 +870,7 @@ def preprocess_data_mult(text_file_paths, max_vocabulary_size, min_occurrence, s
     if len(text_file_paths) == 1: # word_array was kept so far
         if text_file_paths[0][:5] == 'gs://':
             text_file_paths[0] = download_from_gs(text_file_paths[0])
-            
+
         with open(text_file_paths[0]) as text_file:
             word_array = tf.keras.preprocessing.text.text_to_word_sequence(text_file.readline()) # preprocessing here
         id_array = list(map(lambda x: word2id.get(x, 0), word_array))
@@ -981,7 +981,7 @@ def load_process_data(file_name, args, remove_zero = False):
         bucket_name, path_name = split_gs_prefix(file_path)
         client = storage.Client()
         bucket = client.get_bucket(bucket_name[5:])
-        skips_paths = filter_skips_paths(file_name, [bl.name for bl in bucket.list_blobs(prefix=path_name)])
+        skips_paths = filter_skips_paths(file_name, [os.path.basename(bl.name) for bl in bucket.list_blobs(prefix=path_name)])
     else:
         path_name = file_path
         os.makedirs(os.path.dirname(path_name), exist_ok = True)
@@ -990,7 +990,10 @@ def load_process_data(file_name, args, remove_zero = False):
     if len(skips_paths) > 0:
         print(f'Key and value files for {file_name} already exist. Nothing to be done. Consider checking contents.')
         word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'model_data', file_name + '_meta.tsv'))
-        skips_paths = [os.path.join(os.path.dirname(path_name), skips_path) for skips_path in skips_paths]
+        if job_dir[:5] == 'gs://':
+            skips_paths = [os.path.join(os.path.dirname(file_path), skips_path) for skips_path in skips_paths]
+        else:
+            skips_paths = [os.path.join(os.path.dirname(path_name), skips_path) for skips_path in skips_paths]
         return word2id, id2word, word_counts, id_counts, skips_paths
 
     if args.corpus_name == 'enwiki_dump':
@@ -1002,13 +1005,22 @@ def load_process_data(file_name, args, remove_zero = False):
         text_file_paths = load_raw_data(corpus_name, job_dir, n_splits = n_splits)
 
     word2id, id2word, word_counts, id_counts, skips_paths = preprocess_data_mult(text_file_paths, args.max_vocabulary_size, args.min_occurrence, args.skip_window, args.stored_batch_size, store_path = file_path, remove_zero = remove_zero)
-    
+
     if job_dir[:5] == 'gs://':
         for path_name in skips_paths:
             upload_to_gs(path_name + '_key.npy', file_path)
             upload_to_gs(path_name + '_val.npy', file_path)
 
     return word2id, id2word, word_counts, id_counts, skips_paths
+
+
+def normalized_train_file_name(args):
+    if isinstance(args, dict):
+        train_file_name = 'stored_{corpus_name}_maxsize_{max_vocabulary_size}_minocc_{min_occurrence}_window_{skip_window}_storedbatch_{stored_batch_size}'.format(**args)
+    else:
+        train_file_name = 'stored_{corpus_name}_maxsize_{max_vocabulary_size}_minocc_{min_occurrence}_window_{skip_window}_storedbatch_{stored_batch_size}'.format(**dict(args.__dict__))
+    return train_file_name
+
 
 def tmerge(iterators):
     empty = {}
@@ -1026,14 +1038,14 @@ def create_dataset_from_stored_batches(file_paths, stored_batch_size, batch_size
 
     if isinstance(file_paths, list):
         for i, file_path in enumerate(file_paths):
-            if file_path[:5] == 'gs://': 
+            if file_path[:5] == 'gs://':
                 file_paths[i] = download_from_gs(file_path + '_key.npy')[:-8]
                 download_from_gs(file_path + '_val.npy')
         args_key = [np.load(file_path + '_key.npy', mmap_mode='r') for file_path in file_paths]
         args_val = [np.load(file_path + '_val.npy', mmap_mode='r') for file_path in file_paths]
     else:
         file_path = file_paths
-        if file_path[:5] == 'gs://': 
+        if file_path[:5] == 'gs://':
             file_path = download_from_gs(file_path + '_key.npy')[:-8]
             download_from_gs(file_path + '_val.npy')
         args_key = np.load(file_path + '_key.npy', mmap_mode='r')
@@ -1083,7 +1095,7 @@ def create_dataset_from_stored_batches(file_paths, stored_batch_size, batch_size
             pn_dataset = pn_dataset.batch(batch_size)
         if postprocess:
             return pn_dataset.map(lambda key, val, neg: ({'target': key[:, 0], 'pos': key[:, 1], 'neg': neg}
-                                                , tf.pow(tf.clip_by_value(val/threshold, 1., 0.), po)))
+                                                , tf.pow(tf.clip_by_value(val/threshold, 0., 1.), po)))
         else:
             return pn_dataset
     else:
@@ -1092,6 +1104,6 @@ def create_dataset_from_stored_batches(file_paths, stored_batch_size, batch_size
             pn_dataset = pn_dataset.batch(batch_size)
         if postprocess:
             return pn_dataset.map(lambda key, val: ({'target': key[:, 0], 'pos': key[:, 1]}
-                                       , tf.pow(tf.clip_by_value(val/threshold, 1., 0.), po)))
+                                       , tf.pow(tf.clip_by_value(val/threshold, 0., 1.), po)))
         else:
             return pn_dataset

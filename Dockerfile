@@ -14,7 +14,7 @@
 
 # Dockerfile-gpu
 # FROM nvidia/cuda:10.2-cudnn7-runtime
-FROM tensorflow/tensorflow:2.2.0rc3-gpu
+FROM tensorflow/tensorflow:nightly-gpu
 
 # Installs necessary dependencies.
 RUN apt-get update && apt-get install -y --no-install-recommends \
