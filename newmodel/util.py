@@ -981,7 +981,7 @@ def load_process_data(file_name, args, remove_zero = False):
         bucket_name, path_name = split_gs_prefix(file_path)
         client = storage.Client()
         bucket = client.get_bucket(bucket_name[5:])
-        skips_paths = filter_skips_paths(file_name, [bl.name for bl in bucket.list_blobs(prefix=path_name)])
+        skips_paths = filter_skips_paths(file_name, [os.path.basename(bl.name) for bl in bucket.list_blobs(prefix=path_name)])
     else:
         path_name = file_path
         os.makedirs(os.path.dirname(path_name), exist_ok = True)
@@ -990,7 +990,10 @@ def load_process_data(file_name, args, remove_zero = False):
     if len(skips_paths) > 0:
         print(f'Key and value files for {file_name} already exist. Nothing to be done. Consider checking contents.')
         word2id, id2word, word_counts, id_counts = read_corpus_metadata(os.path.join(job_dir, 'model_data', file_name + '_meta.tsv'))
-        skips_paths = [os.path.join(os.path.dirname(path_name), skips_path) for skips_path in skips_paths]
+        if job_dir[:5] == 'gs://':
+            skips_paths = [os.path.join(os.path.dirname(file_path), skips_path) for skips_path in skips_paths]
+        else:
+            skips_paths = [os.path.join(os.path.dirname(path_name), skips_path) for skips_path in skips_paths]
         return word2id, id2word, word_counts, id_counts, skips_paths
 
     if args.corpus_name == 'enwiki_dump':

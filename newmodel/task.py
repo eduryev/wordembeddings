@@ -153,9 +153,9 @@ def train_model(args):
     if len(similarity_tests_dict) > 0:
         similarity_callbacks = train_model.get_similarity_tests_callbacks(similarity_tests_dict, ['target', 'context'], ['l2', 'cos'], args.job_dir, args.log_dir)
     else:
-        similarity_tests_callbacks = []
+        similarity_callbacks = []
 
-    callbacks+= similarity_tests_callbacks
+    callbacks+= similarity_callbacks
 
     # if restore-path is given restore the model
     if args.restore_dir is not None:
@@ -171,13 +171,9 @@ def train_model(args):
         args.save_dir = args.restore_dir
     if args.save_dir:
         save_path = os.path.join(args.job_dir, 'saved_models' , args.save_dir)
-        callbacks+= train_model.get_save_callbacks(save_path, args, period = 5)
+        callbacks+= train_model.get_save_callbacks(save_path, args, period = 1)
 
     train_model.fit(dataset, epochs = args.num_epochs, callbacks = callbacks, initial_epoch = epochs_trained_)
-
-    # if working in GCP, upload similarity tests results
-    if len(similarity_tests_callbacks) > 0:
-        util.upload_to_gs(sim_out_path, args.job_dir)
 
 
 if __name__ == '__main__':

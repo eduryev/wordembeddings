@@ -1,9 +1,15 @@
 
+import os
+import pickle as pkl
+
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Add, Dot, Embedding, Input, Reshape, concatenate
+from tensorflow.keras.callbacks import LambdaCallback
 
 from scipy.stats import spearmanr, pearsonr
+
+from newmodel.util import split_gs_prefix, upload_to_gs, download_from_gs, save_dict, load_dict
 
 
 def load_custom_model(model_path, meta_path, mode = None):
@@ -161,7 +167,7 @@ class BaseModel(tf.keras.models.Model):
             return res
 
 
-    def get_similarity_tests_callbacks(self, tests_dict, mode_list, metric_list, job_dir, log_dir):
+    def get_similarity_tests_callbacks(self, tests_dict, mode_list, metric_list, job_dir, log_dir = None):
         callback_list = []
 
         def callback_factory(mode, metric, verbose = False, ignore_oov = True, delimeter = '\t'):
@@ -169,11 +175,11 @@ class BaseModel(tf.keras.models.Model):
                 if verbose:
                     print('Running similarity tests...', end = '')
                 res = self.fetch_similarity_results(tests_dict, mode, metric, verbose = verbose, ignore_oov = ignore_oov, delimeter = delimeter)
-                try:
-                    log_path = os.path.join(args.job_dir, 'logs', args.log_dir)
-                except AttributeError:
+                if log_dir:
+                    log_path = os.path.join(job_dir, 'logs', log_dir)
+                else:
                     print('Logging directory not specified, writing to `logs/temp` directory')
-                    log_path = os.path.join(args.job_dir, 'logs', 'temp')
+                    log_path = os.path.join(job_dir, 'logs', 'temp')
                 os.makedirs(log_path, exist_ok=True)
 
                 if not verbose:
@@ -247,8 +253,8 @@ class BaseModel(tf.keras.models.Model):
             pkl.dump(optimizer_weights, f)
 
         if save_path[:5] == 'gs://':
-            upload_to_gs(os.path.join(path_name, 'args.pkl'), bucket_name)
-            upload_to_gs(os.path.join(path_name, 'optimizer.pkl'), bucket_name)
+            upload_to_gs(os.path.join(path_name, 'args.pkl'), save_path)
+            upload_to_gs(os.path.join(path_name, 'optimizer.pkl'), save_path)
 
 
     # TODO check that it works for GCP
@@ -374,11 +380,15 @@ class Word2VecNEGLoss(tf.keras.losses.Loss):
     def __init__(self, pow = 1., thresh = 100.):
         super().__init__()
 
-    def call(self, y_true, posneg):
-        S = tf.sigmoid(-posneg)
-        L = y_true*(-tf.math.log(1 - S[:,0]) - tf.reduce_sum(tf.math.log(S[:, 1:]), axis = -1))
-        return tf.keras.backend.mean(L, axis = -1)
+    # def call(self, y_true, posneg):
+    #     S = tf.sigmoid(-posneg)
+    #     L = y_true*(-tf.math.log(1 - S[:,0]) - tf.reduce_sum(tf.math.log(S[:, 1:]), axis = -1))
+    #     return tf.keras.backend.mean(L, axis = -1)
 
+    def call(self, y_true, posneg):
+        p = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(posneg[:,0]), logits=posneg[:,0])
+        n = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(posneg[:,1:]), logits=posneg[:,1:]), axis = -1)
+        return tf.keras.backend.mean(y_true*(p+n), axis = -1)
 
 class Word2VecModel(BaseModel):
     def __init__(self, vocabulary_size, embedding_size, neg_samples, learning_rate = None, word2id = None, id2word = None):
