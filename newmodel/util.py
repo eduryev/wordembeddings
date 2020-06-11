@@ -1092,7 +1092,7 @@ def create_dataset_from_stored_batches(file_paths, stored_batch_size, batch_size
             pn_dataset = pn_dataset.batch(batch_size)
         if postprocess:
             return pn_dataset.map(lambda key, val, neg: ({'target': key[:, 0], 'pos': key[:, 1], 'neg': neg}
-                                                , tf.pow(tf.clip_by_value(val/threshold, 1., 0.), po)))
+                                                , tf.pow(tf.clip_by_value(val/threshold, 0., 1.), po)))
         else:
             return pn_dataset
     else:
@@ -1101,6 +1101,6 @@ def create_dataset_from_stored_batches(file_paths, stored_batch_size, batch_size
             pn_dataset = pn_dataset.batch(batch_size)
         if postprocess:
             return pn_dataset.map(lambda key, val: ({'target': key[:, 0], 'pos': key[:, 1]}
-                                       , tf.pow(tf.clip_by_value(val/threshold, 1., 0.), po)))
+                                       , tf.pow(tf.clip_by_value(val/threshold, 0., 1.), po)))
         else:
             return pn_dataset
