@@ -42,16 +42,17 @@ ANALOGY_TEST_GROUPS = {
 
 
 def get_similarity_tests(job_dir):
-    tests_path = os.path.join(job_dir, 'tests', 'similarity_tests')
-    tests_list = get_tests(tests_path)
-    tests_dict = {SIMILARITY_TEST_NAMES.get(test, test):os.path.join(tests_path, test) for test in tests_list}
+    tests_dir = os.path.join(job_dir, 'tests', 'similarity_tests')
+    tests_paths = get_tests(tests_dir)
+    tests_dict = {SIMILARITY_TEST_NAMES.get(os.path.basename(test_path), os.path.basename(test_path)):test_path for test_path in tests_paths}
     return tests_dict
 
 def get_analogy_tests(job_dir):
-    tests_path = os.path.join(job_dir, 'tests', 'analogy_tests')
-    tests_list = get_tests(tests_path)
-    tests_dict = {ANALOGY_TEST_NAMES.get(test, test):os.path.join(tests_path, test) for test in tests_list}
+    tests_dir = os.path.join(job_dir, 'tests', 'analogy_tests')
+    tests_paths = get_tests(tests_dir)
+    tests_dict = {ANALOGY_TEST_NAMES.get(os.path.basename(test_path), os.path.basename(test_path)):test_path for test_path in tests_paths}
     return tests_dict
+
 
 def get_tests(tests_path):
     if tests_path[:5] == 'gs://': # make the file available in the container
@@ -78,4 +79,4 @@ def get_tests(tests_path):
             return {}
 
     tests_list = os.listdir(tests_path)
-    return [test for test in tests_list if test[-4:] in ('.tsv', '.txt')]
+    return [os.path.join(tests_path, test) for test in tests_list if test[-4:] in ('.tsv', '.txt')]

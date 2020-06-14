@@ -1113,7 +1113,7 @@ def lr_scheduler_factory(learning_rate, decay_start_period = 10, decay_rate = tf
     """
     decay rate -- halves every 4 epochs
     """
-    def lr_scheduler(epoch)
+    def lr_scheduler(epoch):
         if epoch < decay_start_period:
             return learning_rate
         else:

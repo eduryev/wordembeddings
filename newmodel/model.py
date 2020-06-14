@@ -1,6 +1,7 @@
 
 import os
 import pickle as pkl
+from types import SimpleNamespace
 
 import numpy as np
 import tensorflow as tf
@@ -85,9 +86,9 @@ class BaseModel(tf.keras.models.Model):
         Load train arguments, optimizer state and train epoch
         '''
         if load_path[:5] == 'gs://':
-            download_from_gs(os.path.join(load_path), 'args.pkl')
-            load_path = download_from_gs(os.path.join(load_path), 'optimizer.pkl')
-            load_path = os.path.basename(load_path)
+            download_from_gs(os.path.join(load_path, 'args.pkl'))
+            load_path = download_from_gs(os.path.join(load_path, 'optimizer.pkl'))
+            load_path = os.path.dirname(load_path)
 
         with open(os.path.join(load_path, 'args.pkl'), 'rb') as f:
             args = pkl.load(f)
@@ -107,7 +108,7 @@ class BaseModel(tf.keras.models.Model):
         args_, epochs_trained_, optimizer_weights_ = BaseModel.load_train_config(load_path)
         latest = tf.train.latest_checkpoint(load_path)
         # initial_epoch = int(os.path.basename(latest)[-9:-5])
-        dummy_key = {'target': np.zeros(1, dtype = np.int32), 'pos': np.zeros(1, dtype = np.int32), 'neg': np.zeros(1, dtype = np.int32)}
+        dummy_key = {'target': np.zeros(1, dtype = np.int32), 'pos': np.zeros(1, dtype = np.int32), 'neg': np.zeros(shape = (1, self.neg_samples), dtype = np.int32)}
         dummy_val = np.zeros(1, dtype = np.float32)
 
         if not self._is_compiled:

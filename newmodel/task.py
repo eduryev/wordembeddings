@@ -160,7 +160,7 @@ def train_model(args):
         similarity_callbacks = []
 
     # 2. analogy callbacks
-    analogy_tests_dict = get_analogy_tests(args.job_dir)
+    analogy_tests_dict = tests.get_analogy_tests(args.job_dir)
     print('Found following analogy tests:')
     print(analogy_tests_dict)
     if len(analogy_tests_dict) > 0:
