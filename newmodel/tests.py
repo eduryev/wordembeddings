@@ -22,11 +22,39 @@ SIMILARITY_TEST_NAMES =  {
      'wordsim_similarity_goldstandard.tsv':'WSsim'
      }
 
+ANALOGY_TEST_NAMES =  {
+     'questions-words.txt': 'QW',
+     }
+
+ANALOGY_TEST_GROUPS = {
+    'semantic' : ['capital-common-countries', 'capital-world', 'currency'
+    , 'city-in-state', 'city-in-state'],
+    'syntactic' : ['gram1-adjective-to-adverb', 'gram2-opposite'
+    , 'gram3-comparative', 'gram4-superlative', 'gram5-present-participle'
+    , 'gram6-nationality-adjective', 'gram7-past-tense', 'gram8-plural'
+    , 'gram9-plural-verbs'],
+    'combined' : ['capital-common-countries', 'capital-world', 'currency'
+    , 'city-in-state', 'city-in-state', 'gram1-adjective-to-adverb', 'gram2-opposite'
+    , 'gram3-comparative', 'gram4-superlative', 'gram5-present-participle'
+    , 'gram6-nationality-adjective', 'gram7-past-tense', 'gram8-plural'
+    , 'gram9-plural-verbs']
+}
+
 
 def get_similarity_tests(job_dir):
-    tests_path = os.path.join(job_dir, 'tests/similarity_tests')
+    tests_path = os.path.join(job_dir, 'tests', 'similarity_tests')
+    tests_list = get_tests(tests_path)
+    tests_dict = {SIMILARITY_TEST_NAMES.get(test, test):os.path.join(tests_path, test) for test in tests_list}
+    return tests_dict
 
-    if job_dir[:5] == 'gs://': # make the file available in the container
+def get_analogy_tests(job_dir):
+    tests_path = os.path.join(job_dir, 'tests', 'analogy_tests')
+    tests_list = get_tests(tests_path)
+    tests_dict = {ANALOGY_TEST_NAMES.get(test, test):os.path.join(tests_path, test) for test in tests_list}
+    return tests_dict
+
+def get_tests(tests_path):
+    if tests_path[:5] == 'gs://': # make the file available in the container
         # if tests are found in gcp bucket, overwrite local tests
         # else attempt using local test AND upload them to Google Storage Bucket
 
@@ -50,17 +78,4 @@ def get_similarity_tests(job_dir):
             return {}
 
     tests_list = os.listdir(tests_path)
-    tests_dict = {SIMILARITY_TEST_NAMES.get(test, test):os.path.join(tests_path, test) for test in tests_list if test[-4:] in ('.tsv', '.txt')}
-
-    return tests_dict
-
-
-    # create a log for each (mode, metric) pair
-    for mode in mode_list:
-        for metric in metric_list:
-
-            callback_func = callback_factory(mode, metric)
-            callback = LambdaCallback(on_epoch_end = callback_func)
-            callback_list.append(callback)
-
-    return callback_list, out_path
+    return [test for test in tests_list if test[-4:] in ('.tsv', '.txt')]

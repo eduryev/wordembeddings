@@ -109,8 +109,8 @@ def get_args():
 
 
 def train_model(args):
-    # download and process data if does not exist
 
+    # download and process data if does not exist
     train_file_name = train_file_name = util.normalized_train_file_name(args)
     train_file_path = os.path.join(args.job_dir, 'model_data', train_file_name)
 
@@ -131,22 +131,26 @@ def train_model(args):
         unigram = None
 
     dataset = util.create_dataset_from_stored_batches(skips_paths, args.stored_batch_size, batch_size = args.batch_size, sampling_distribution = unigram, threshold = args.threshold, po = args.po, neg_samples = args.neg_samples)
+
+
     # create the model and follow additional model specific instructions (e.g. callbacks)
     if args.mode == 'glove':
-        train_model = model.GloveModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
+        train_model = model.GloveModel(vocabulary_size, args.embedding_size, args.neg_samples, learning_rate = args.learning_rate, word2id = word2id, id2word = id2word)
         train_model.compile(loss = train_model.loss, optimizer = train_model.optimizer)
     elif args.mode == 'word2vec':
-        train_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
+        train_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples, learning_rate = args.learning_rate, word2id = word2id, id2word = id2word)
         train_model.compile(loss = train_model.loss, optimizer = train_model.optimizer)
     elif args.mode == 'hypglove':
-        train_model = model.HypGloveModel(vocabulary_size, args.embedding_size, args.neg_samples, word2id = word2id, id2word = id2word)
+        train_model = model.HypGloveModel(vocabulary_size, args.embedding_size, args.neg_samples, learning_rate = args.learning_rate, word2id = word2id, id2word = id2word)
         train_model.compile(loss = train_model.loss, optimizer = train_model.optimizer)
     else:
         raise NotImplementedError
 
+
+    # defining callbacks
     callbacks = []
 
-    # similarity callbacks
+    # 1. similarity callbacks
     similarity_tests_dict = tests.get_similarity_tests(args.job_dir)
     print('Found following similarity tests:')
     print(similarity_tests_dict)
@@ -155,7 +159,22 @@ def train_model(args):
     else:
         similarity_callbacks = []
 
-    callbacks+= similarity_callbacks
+    # 2. analogy callbacks
+    analogy_tests_dict = get_analogy_tests(args.job_dir)
+    print('Found following analogy tests:')
+    print(analogy_tests_dict)
+    if len(analogy_tests_dict) > 0:
+        analogy_callbacks = train_model.get_analogy_tests_callbacks(analogy_tests_dict, ['target', 'context'], ['l2', 'cos'], args.job_dir, args.log_dir, group_dict = tests.ANALOGY_TEST_GROUPS)
+    else:
+        analogy_callbacks = []
+
+    # 3. loss callbacks
+    loss_callbacks = [train_model.get_loss_callback(args.job_dir, args.log_dir)]
+    callbacks+= similarity_callbacks + analogy_callbacks + loss_callbacks
+
+    # 4. use decaying learning rate
+    callbacks.append(tf.keras.callbacks.LearningRateScheduler(util.lr_scheduler_factory(args.learning_rate)))
+
 
     # if restore-path is given restore the model
     if args.restore_dir is not None:
