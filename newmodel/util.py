@@ -1107,3 +1107,15 @@ def create_dataset_from_stored_batches(file_paths, stored_batch_size, batch_size
                                        , tf.pow(tf.clip_by_value(val/threshold, 0., 1.), po)))
         else:
             return pn_dataset
+
+
+def lr_scheduler_factory(learning_rate, decay_start_period = 10, decay_rate = tf.math.log(.5)/4):
+    """
+    decay rate -- halves every 4 epochs
+    """
+    def lr_scheduler(epoch):
+        if epoch < decay_start_period:
+            return learning_rate
+        else:
+            return learning_rate * tf.math.exp(decay_rate*(epoch-decay_start_period))
+    return lr_scheduler
