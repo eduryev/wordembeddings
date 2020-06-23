@@ -132,7 +132,6 @@ def load_unpack_zip(corpus_name, job_dir, n_splits = None):
         cur_path_name = path_name[:-4] + f'_sub{cur}'
         cur_out = open(cur_path_name , 'w+')
         for c, line in tqdm(enumerate(stream)):
-            # line = line.strip()
             if line:
                 cur_out.write(line + '\n')
             if (c+1)%N == 0 or c+1 == p:
@@ -257,7 +256,6 @@ def load_unpack_bz2url(ind, job_dir, n_splits = None):
             os.remove(path_name) # remove local file
 
 
-
 def split_gs_prefix(file_path):
     ind = [i for i,l in enumerate(file_path) if l == '/'][2]
     bucket_name, path_name = file_path[:ind], file_path[ind+1:]
@@ -300,6 +298,38 @@ def upload_to_gs(path_to_upload, job_dir):
         bl.upload_from_filename(filename=path_to_upload)
 
 
+def create_perl_cleanup_script(job_dir):
+    with urllib.request.urlopen('http://mattmahoney.net/dc/textdata.html') as webpage:
+        lines = []
+        for line in webpage.readlines():
+            ## TODO: gotta be a better way
+            try:
+                line = line.decode('utf-8').strip()
+                line = line.replace('&amp;', '&')
+                if line.find('s/&lt;/') == 0:
+                    line = 's/&lt;/</g;'
+                elif line.find('s/&gt;/') == 0:
+                    line = 's/&gt;/>/g;'
+                elif line.find('icons') > 0:
+                    line = 's/{\\{[^}]*}}//g;         # remove {{icons}} and {tables}'
+                elif line.find('tr/a-z') == 0:
+                    lines.append('tr/a-z\.\\n/ /cs;')
+                    lines.append('tr/\\n/./;')
+                    lines.append('s/(\\.+\\s*)+/\\. /g;')
+                    continue
+                else:
+                    line = line.replace('&gt;', '>').replace('&lt;', '<')
+                if len(line) == 0 or line[0] != '<':
+                    lines.append(line)
+            except UnicodeDecodeError:
+                pass
+
+    script_ind = [i for i, line in enumerate(lines) if line.find('#!/usr/bin/perl') == 0][0]
+    with open(os.path.join(job_dir, 'main_.pl'), 'w+') as script_file:
+        script_file.write('\n'.join(lines[script_ind:]))
+
+
+
 def load_raw_data(corpus_name, job_dir, perl_cleanup = True, n_splits = None):
     """
     Takes in a corpus name, checks whether matching .txt file exists in job_dir,
@@ -328,6 +358,8 @@ def load_raw_data(corpus_name, job_dir, perl_cleanup = True, n_splits = None):
             else:
                 load_unpack_zip(corpus_name, job_dir, n_splits = n_splits)
         if perl_cleanup:
+            if not os.path.exists('main_.pl'):
+                create_perl_cleanup_script(job_dir)
             assert os.path.exists('main_.pl')
 
             text_file_paths = [text_file_path[:-4] + f'_sub{s}.txt' for s in range(n_splits)] if n_splits else [text_file_path]
@@ -368,6 +400,8 @@ def load_raw_data(corpus_name, job_dir, perl_cleanup = True, n_splits = None):
                 load_unpack_zip(corpus_name, job_dir, n_splits = n_splits)
 
         if perl_cleanup:
+            if not os.path.exists('main_.pl'):
+                create_perl_cleanup_script(job_dir)
             assert os.path.exists('main_.pl')
 
             text_file_paths = [text_file_path[:-4] + f'_sub{s}.txt' for s in range(n_splits)] if n_splits else [text_file_path]
@@ -551,27 +585,6 @@ def update_stored_chunks(skips_upd, chunk_thresholds, new_cache_path, old_cache_
         print(f'Saved chunk {new_cache_path}_{c0}_{c1}. Chunk length: {len(chunk)/10**6} millions.')
         del chunk
         gc.collect()
-
-
-def collect_skips(cache_path, chunk_thresholds, count_threshold = .5):
-    skips_key = np.zeros(shape = (0,2), dtype = np.int32)
-    skips_val = np.zeros(shape = (0,), dtype = np.float32)
-    for c0, c1 in zip(chunk_thresholds[:-1], chunk_thresholds[1:]):
-        chunk_name = f'{cache_path}_{c0}_{c1}.pkl'
-        chunk = load_dict(chunk_name)
-        print(f'Collecting skip {chunk_name}')
-        chunk_key, chunk_val = postprocess_count_skips(chunk, count_threshold=count_threshold)
-
-        del chunk
-        gc.collect()
-
-        skips_key = np.concatenate([skips_key, chunk_key], axis = 0)
-        skips_val = np.concatenate([skips_val, chunk_val], axis = 0)
-
-        del chunk_key, chunk_val
-        gc.collect()
-
-    return (skips_key, skips_val)
 
 
 def shuffle_stored_batches(file_paths, stored_batch_size = None):

@@ -78,5 +78,7 @@ def get_tests(tests_path):
         else:
             return {}
 
+    if not os.path.exists(tests_path):
+        return []
     tests_list = os.listdir(tests_path)
     return [os.path.join(tests_path, test) for test in tests_list if test[-4:] in ('.tsv', '.txt')]

@@ -31,8 +31,6 @@ def load_custom_model(model_path, meta_path, mode = None):
     return model, args_, epochs_trained_
 
 
-from scipy.stats import spearmanr, pearsonr
-
 class BaseModel(tf.keras.models.Model):
     def __init__(self, vocabulary_size, embedding_size, neg_samples, learning_rate = None, word2id = None, id2word = None):
         super().__init__()
@@ -80,7 +78,7 @@ class BaseModel(tf.keras.models.Model):
             upload_to_gs(os.path.join(path_name, 'optimizer.pkl'), save_path)
 
 
-    # note, this funcion belongs to a class, not class instance
+    # note this funcion belongs to a class, not a class instance
     def load_train_config(load_path):
         '''
         Load train arguments, optimizer state and train epoch
@@ -122,7 +120,9 @@ class BaseModel(tf.keras.models.Model):
 
     def get_save_callbacks(self, save_path, args, period = 1):
         if save_path is None:
-            save_path = args.save_path
+            if args.save_dir is None: # don't save the model
+                return []
+            save_path = os.path.join(args.job_dir, 'saved_models' , args.save_dir) # default save_path
 
         callbacks = []
         def save_config_callback_factory(save_path, args):
@@ -144,16 +144,16 @@ class BaseModel(tf.keras.models.Model):
         return callbacks
 
 
-    # functions for searching closes words
+    # functions for searching closest words
     def get_embedding(self, id_or_word_array, mode = 'target'):
         self.validate_mode_name(mode)
         if isinstance(id_or_word_array, (np.ndarray, tf.Tensor)) or len(id_or_word_array) == 0:
             pass
         elif isinstance(id_or_word_array[0], int):
-            id_array = np.array(id_or_word_array, dtype = np.int32)
+            id_or_word_array = np.array(id_or_word_array, dtype = np.int32)
         else: # try converting words to ids
             assert self.word2id
-            id_array = np.array([self.word2id[w] for w in id_or_word_array], dtype = np.int32)
+            id_or_word_array = np.array([self.word2id[w] for w in id_or_word_array], dtype = np.int32)
 
         if mode == 'target':
             emb = self.T_embedding(id_or_word_array)
@@ -166,7 +166,6 @@ class BaseModel(tf.keras.models.Model):
 
         return emb
 
-    # TODO: put 'normalize_rows' in utils
     def normalize_rows(self, sample_emb):
         return sample_emb/tf.sqrt(tf.reduce_sum(tf.square(sample_emb), axis = 1, keepdims = True))
 
@@ -203,7 +202,7 @@ class BaseModel(tf.keras.models.Model):
             w_emb = tf.concat(self.C_embedding.weights[0], self.T_embedding.weights[0], axis = 1)
 
         if metric == 'l2':
-            # this is bad, because 3d array is allocated in memory
+            # this would be bad, because 3d array is allocated in memory
             # return tf.sqrt(tf.square(tf.reduce_sum(tf.expand_dims(w_emb, -1) - tf.expand_dims(tf.transpose(sample_emb), 0), axis = 1)))
             dot = tf.matmul(w_emb, sample_emb, transpose_b=True)
             # d(a,b)^2 = a^2 - 2(a, b) + b^2
@@ -287,17 +286,18 @@ class BaseModel(tf.keras.models.Model):
     def get_similarity_tests_callbacks(self, tests_dict, mode_list, metric_list, job_dir, log_dir = None):
         callback_list = []
 
+        if log_dir:
+                log_path = os.path.join(job_dir, 'logs', log_dir)
+        else:
+            print('Logging directory for similarity tests is not specified, writing to `logs/temp` directory')
+            log_path = os.path.join(job_dir, 'logs', 'temp')
+        os.makedirs(log_path, exist_ok=True)
+
         def callback_factory(mode, metric, verbose = False, ignore_oov = True, delimeter = '\t'):
             def similarity_scalar(epoch, logs):
                 if verbose:
                     print('Running similarity tests...', end = '')
                 res = self.fetch_similarity_results(tests_dict, mode, metric, verbose = verbose, ignore_oov = ignore_oov, delimeter = delimeter)
-                if log_dir:
-                    log_path = os.path.join(job_dir, 'logs', log_dir)
-                else:
-                    print('Logging directory not specified, writing to `logs/temp` directory')
-                    log_path = os.path.join(job_dir, 'logs', 'temp')
-                os.makedirs(log_path, exist_ok=True)
 
                 if not verbose:
                     file_writer = tf.summary.create_file_writer(os.path.join(log_path, 'metrics', metric, mode))
@@ -324,9 +324,8 @@ class BaseModel(tf.keras.models.Model):
         return callback_list
 
 
-    ## merging Edik's logic here
     ## analogy test functions
-    # read analogy tests from 'questions-words.txt', convert lists of words to 2D=arrays of indices separately for semantic and syntactic tasks
+    # read analogy tests from 'questions-words.txt', convert lists of words to 2D arrays of indices separately for semantic and syntactic tasks
     def read_analogy_file(self, test_file_path, delimeter = ' ', ignore_sections = False): # note the delimeter
         tasks_dict = {}
         id_array = []
@@ -415,7 +414,7 @@ class BaseModel(tf.keras.models.Model):
 
         return res
 
-    # TODO: move to tests script
+
     def group_analogy_test_results(self, out_dict, group_dict):
         res = {k:[0,0,0] for k in group_dict.keys()}
         init_keys = list(out_dict.keys())
@@ -430,6 +429,13 @@ class BaseModel(tf.keras.models.Model):
 
     def get_analogy_tests_callbacks(self, tests_dict, mode_list, metric_list, job_dir, log_dir = None, group_dict = None):
         callback_list = []
+
+        if log_dir:
+            log_path = os.path.join(job_dir, 'logs', log_dir)
+        else:
+            print('Logging directory for analogy tests is not specified, writing to `logs/temp` directory')
+            log_path = os.path.join(job_dir, 'logs', 'temp')
+        os.makedirs(log_path, exist_ok=True)
 
         def callback_factory(mode, metric, verbose = False, delimeter = ' ', ignore_triple = True, ignore_unknown = True, group_dict = group_dict):
             def analogy_scalar(epoch, logs):
@@ -457,13 +463,6 @@ class BaseModel(tf.keras.models.Model):
                     if oov == tot:
                         del res[section]
 
-                if log_dir:
-                    log_path = os.path.join(job_dir, 'logs', log_dir)
-                else:
-                    print('Logging directory not specified, writing to `logs/temp` directory')
-                    log_path = os.path.join(job_dir, 'logs', 'temp')
-                os.makedirs(log_path, exist_ok=True)
-
                 file_writer = tf.summary.create_file_writer(os.path.join(log_path, 'metrics', metric, mode))
                 file_writer.set_as_default()
                 for section, (positive, oov, tot) in res.items():
@@ -483,13 +482,13 @@ class BaseModel(tf.keras.models.Model):
 
 
     def get_loss_callback(self, job_dir, log_dir):
+        if log_dir:
+            log_path = os.path.join(job_dir, 'logs', log_dir)
+        else:
+            print('Logging directory for loss records is not specified, writing to `logs/temp` directory')
+            log_path = os.path.join(job_dir, 'logs', 'temp')
+        os.makedirs(log_path, exist_ok=True)
         def loss_scalar(epoch, logs):
-            if log_dir:
-                log_path = os.path.join(job_dir, 'logs', log_dir)
-            else:
-                print('Logging directory not specified, writing to `logs/temp` directory')
-                log_path = os.path.join(job_dir, 'logs', 'temp')
-            os.makedirs(log_path, exist_ok=True)
 
             file_writer = tf.summary.create_file_writer(os.path.join(log_path, 'train'))
             file_writer.set_as_default()
@@ -500,13 +499,9 @@ class BaseModel(tf.keras.models.Model):
 
 # Word2Vec model with NEG loss
 class Word2VecNEGLoss(tf.keras.losses.Loss):
+
     def __init__(self, pow = 1., thresh = 100.):
         super().__init__()
-
-    # def call(self, y_true, posneg):
-    #     S = tf.sigmoid(-posneg)
-    #     L = y_true*(-tf.math.log(1 - S[:,0]) - tf.reduce_sum(tf.math.log(S[:, 1:]), axis = -1))
-    #     return tf.keras.backend.mean(L, axis = -1)
 
     def call(self, y_true, posneg):
         p = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(posneg[:,0]), logits=posneg[:,0])

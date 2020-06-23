@@ -24,17 +24,6 @@ def get_args():
         required=True,
         help='local or GCS location for writing checkpoints and exporting models')
     parser.add_argument(
-        '--mode',
-        type=str,
-        required=True,
-        default = 'glove',
-        help='glove, hypglove, word2vec')
-    parser.add_argument(
-        '--corpus-name',
-        type=str,
-        required=True,
-        help='enwik8, enwik9, enwiki_dump')
-    parser.add_argument(
         '--log-dir',
         type=str,
         required=False,
@@ -53,29 +42,20 @@ def get_args():
         default=None,
         help='Directory in `job_dir` to store model results')
     parser.add_argument(
-        '--num-epochs',
-        type=int,
-        default=1)
-    parser.add_argument(
-        '--batch-size',
-        type=int,
-        default=32768)
-    parser.add_argument(
-        '--learning-rate',
-        type=int,
-        default=1e-3)
-    # parser.add_argument(
-    #     '--eval-step',
-    #     type=int,
-    #     default = 200)
-    # parser.add_argument(
-    #   '--display-step',
-    #   type=int,
-    #   default = 1000)
+        '--mode',
+        type=str,
+        required=True,
+        default = 'glove',
+        help='glove, hypglove, word2vec')
     parser.add_argument(
         '--embedding-size',
         type=int,
         default = 200)
+    parser.add_argument(
+        '--corpus-name',
+        type=str,
+        required=True,
+        help='enwik8, enwik9, enwiki_dump')
     parser.add_argument(
         '--max-vocabulary-size',
         type=int,
@@ -89,13 +69,25 @@ def get_args():
         type=int,
         default = 5)
     parser.add_argument(
-        '--neg-samples',
+        '--num-epochs',
         type=int,
-        default = 16)
+        default=1)
+    parser.add_argument(
+        '--learning-rate',
+        type=int,
+        default=1e-3)
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=32768)
     parser.add_argument(
         '--stored-batch-size',
         type=int,
         default = 131072)
+    parser.add_argument(
+        '--neg-samples',
+        type=int,
+        default = 16)
     parser.add_argument(
         '--po',
         type=float,
