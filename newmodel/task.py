@@ -1,6 +1,4 @@
-
-
-import time
+import time, datetime
 import argparse
 import os
 
@@ -8,10 +6,9 @@ import numpy as np
 import tensorflow as tf
 # from tensorflow.python.lib.io import file_io
 
-from . import model
-from . import util
-
-
+import newmodel.model as model #from . import model
+import newmodel.util as util #from . import util
+import newmodel.tests as tests
 
 
 def get_args():
@@ -27,34 +24,38 @@ def get_args():
         required=True,
         help='local or GCS location for writing checkpoints and exporting models')
     parser.add_argument(
-        '--corpus-name',
+        '--log-dir',
+        type=str,
+        required=False,
+        default = 'logs',
+        help='Subfolder with checkpoints to restore the model from')
+    parser.add_argument(
+        '--restore-dir',
+        type=str,
+        required=False,
+        default = None,
+        help='Directory in `job_dir` with checkpoints to restore the model from')
+    parser.add_argument(
+        '--save-dir',
+        type=str,
+        required=False,
+        default=None,
+        help='Directory in `job_dir` to store model results')
+    parser.add_argument(
+        '--mode',
         type=str,
         required=True,
-        help='enwik8')
-    parser.add_argument(
-        '--num-epochs',
-        type=int,
-        default=1)
-    parser.add_argument(
-        '--batch-size',
-        type=int,
-        default=8092)
-    parser.add_argument(
-        '--learning-rate',
-        type=int,
-        default=1e-3)
-    # parser.add_argument(
-    #     '--eval-step',
-    #     type=int,
-    #     default = 200)
-    # parser.add_argument(
-    #   '--display-step',
-    #   type=int,
-    #   default = 1000)
+        default = 'glove',
+        help='glove, hypglove, word2vec')
     parser.add_argument(
         '--embedding-size',
         type=int,
         default = 200)
+    parser.add_argument(
+        '--corpus-name',
+        type=str,
+        required=True,
+        help='enwik8, enwik9, enwiki_dump')
     parser.add_argument(
         '--max-vocabulary-size',
         type=int,
@@ -68,60 +69,127 @@ def get_args():
         type=int,
         default = 5)
     parser.add_argument(
-        '--neg-samples',
+        '--num-epochs',
         type=int,
-        default = 16)
+        default=1)
+    parser.add_argument(
+        '--learning-rate',
+        type=int,
+        default=1e-3)
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=32768)
     parser.add_argument(
         '--stored-batch-size',
         type=int,
-        default = 32768)
+        default = 131072)
+    parser.add_argument(
+        '--neg-samples',
+        type=int,
+        default = 16)
     parser.add_argument(
         '--po',
         type=float,
         default = 0.75)
     parser.add_argument(
         '--threshold',
-        type=float,
-        default = 100.)
-
+        type=int,
+        default = 100)
     args, _ = parser.parse_known_args()
     return args
 
 
 def train_model(args):
-    # download and process data if does not exist
 
-    # TODO: replace with vocabulary formatting
-    train_file_name = f'stored_{args.corpus_name}_maxsize_{args.max_vocabulary_size}_minocc_{args.min_occurrence}_window_{args.skip_window}_storedbatch_{args.stored_batch_size}.npy'
-    train_file_path = os.path.join(args.job_dir, train_file_name)
-    # print(train_file_name)
-    word2id, id2word, word_counts, id_counts = util.load_process_data(train_file_name, args)
+    # download and process data if does not exist
+    train_file_name = train_file_name = util.normalized_train_file_name(args)
+    train_file_path = os.path.join(args.job_dir, 'model_data', train_file_name)
+
+    # if this fails, pipeline won't work properly generating incompatible tails.
+    assert args.stored_batch_size % args.batch_size == 0
+
+    word2id, id2word, word_counts, id_counts, skips_paths = util.load_process_data(train_file_name, args, remove_zero = False)
     vocabulary_size = len(word2id)
 
     # create the dataset
-    arr_counts = np.array([id_counts[i] for i in range(len(id2word))], dtype = np.float32)
-    # TODO: Note this power is different in principle
-    arr_counts[:] = arr_counts**args.po
-    unigram = arr_counts/arr_counts.sum()
-    dataset = util.create_dataset_from_stored_batch_sizees(train_file_path, args.batch_size, args.stored_batch_size, args.neg_samples, unigram, args.threshold, args.po)
+    neg_samples = 0 if args.mode in ['glove', 'hypglove'] else args.neg_samples
+    if args.neg_samples > 0:
+        arr_counts = np.array([id_counts[i] for i in range(len(id2word))], dtype = np.float32)
+        # TODO: Note this power is different in principle
+        arr_counts[:] = arr_counts**args.po
+        unigram = arr_counts/arr_counts.sum()
+    else:
+        unigram = None
 
-    for batch in dataset.take(1):
-        print(batch[0]['target'].shape, batch[1].shape)
+    dataset = util.create_dataset_from_stored_batches(skips_paths, args.stored_batch_size, batch_size = args.batch_size, sampling_distribution = unigram, threshold = args.threshold, po = args.po, neg_samples = args.neg_samples)
 
-    return
-    # create the model
-    w2v_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples)
-    w2v_model.compile(loss = Word2VecNEGLoss(), optimizer = w2v_model.optimizer)
+
+    # create the model and follow additional model specific instructions (e.g. callbacks)
+    if args.mode == 'glove':
+        train_model = model.GloveModel(vocabulary_size, args.embedding_size, args.neg_samples, learning_rate = args.learning_rate, word2id = word2id, id2word = id2word)
+        train_model.compile(loss = train_model.loss, optimizer = train_model.optimizer)
+    elif args.mode == 'word2vec':
+        train_model = model.Word2VecModel(vocabulary_size, args.embedding_size, args.neg_samples, learning_rate = args.learning_rate, word2id = word2id, id2word = id2word)
+        train_model.compile(loss = train_model.loss, optimizer = train_model.optimizer)
+    elif args.mode == 'hypglove':
+        train_model = model.HypGloveModel(vocabulary_size, args.embedding_size, args.neg_samples, learning_rate = args.learning_rate, word2id = word2id, id2word = id2word)
+        train_model.compile(loss = train_model.loss, optimizer = train_model.optimizer)
+    else:
+        raise NotImplementedError
+
+
+    # defining callbacks
+    callbacks = []
+
+    # 1. similarity callbacks
+    similarity_tests_dict = tests.get_similarity_tests(args.job_dir)
+    print('Found following similarity tests:')
+    print(similarity_tests_dict)
+    if len(similarity_tests_dict) > 0:
+        similarity_callbacks = train_model.get_similarity_tests_callbacks(similarity_tests_dict, ['target', 'context'], ['l2', 'cos'], args.job_dir, args.log_dir)
+    else:
+        similarity_callbacks = []
+
+    # 2. analogy callbacks
+    analogy_tests_dict = tests.get_analogy_tests(args.job_dir)
+    print('Found following analogy tests:')
+    print(analogy_tests_dict)
+    if len(analogy_tests_dict) > 0:
+        analogy_callbacks = train_model.get_analogy_tests_callbacks(analogy_tests_dict, ['target', 'context'], ['l2', 'cos'], args.job_dir, args.log_dir, group_dict = tests.ANALOGY_TEST_GROUPS)
+    else:
+        analogy_callbacks = []
+
+    # 3. loss callbacks
+    loss_callbacks = [train_model.get_loss_callback(args.job_dir, args.log_dir)]
+    callbacks+= similarity_callbacks + analogy_callbacks + loss_callbacks
+
+    # 4. use decaying learning rate
+    callbacks.append(tf.keras.callbacks.LearningRateScheduler(util.lr_scheduler_factory(args.learning_rate)))
+
+
+    # if restore-path is given restore the model
+    if args.restore_dir is not None:
+        restore_path = os.path.join(args.job_dir, 'saved_models', args.restore_dir)
+        print(f'Restoring model weights from {restore_path}')
+        _, epochs_trained_ = train_model.load_model(os.path.join(args.job_dir, 'saved_models', args.restore_dir))
+        #train_model.load_weights(latest)
+    else:
+        epochs_trained_ = 0
 
     # train the model
-    # TODO: checkpoints
-    w2v_model.fit(dataset, epochs = 1)
+    if args.save_dir is None: # save to restore_dir unless instructed otherwise
+        args.save_dir = args.restore_dir
+    if args.save_dir:
+        save_path = os.path.join(args.job_dir, 'saved_models' , args.save_dir)
+        callbacks+= train_model.get_save_callbacks(save_path, args, period = 1)
 
-    # save terminal model
-
+    train_model.fit(dataset, epochs = args.num_epochs, callbacks = callbacks, initial_epoch = epochs_trained_)
 
 
 if __name__ == '__main__':
     args = get_args()
-    # tf.compat.v1.logging.set_verbosity(args.verbosity)
+    assert args.mode in ['hypglove', 'glove', 'word2vec'] # TODO: do it natively with argparse module
+
+# tf.compat.v1.logging.set_verbosity(args.verbosity)
     train_model(args)
