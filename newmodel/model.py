@@ -581,12 +581,12 @@ class HypGloveModel(BaseModel):
     def __init__(self, vocabulary_size, embedding_size, neg_samples, learning_rate = None, word2id = None, id2word = None):
         super().__init__(vocabulary_size, embedding_size, neg_samples, learning_rate = learning_rate, word2id = word2id, id2word = id2word)
 
-        # model specific part
+        # self.type = 'hypglove'
         self.loss = GloveLoss()
 
         self.T_bias = Embedding(vocabulary_size, 1, input_length=1, name='target_bias')
         self.T_sigma = Embedding(vocabulary_size, 1, input_length=1, embeddings_initializer = tf.keras.initializers.Constant(value=0.1), name='target_sigma')
-        self.context_bias = Embedding(vocabulary_size, 1, input_length=1, name='context_bias')
+        self.C_bias = Embedding(vocabulary_size, 1, input_length=1, name='context_bias')
 
         self.dot_layer = Dot(axes = -1)
         self.add_layer = Add()
@@ -601,14 +601,18 @@ class HypGloveModel(BaseModel):
         w_context = self.C_embedding(inputs['pos'])
         b_target = self.T_bias(inputs['target'])
         b_context = self.C_bias(inputs['pos'])
-        sigma = self.TT_sigma(inputs['target'])
+        sigma_target = self.T_sigma(inputs['target'])
 
-        w_target_scaled = w_target/sigma
-        w_context_scaled = w_context/sigma
+        w_scaled = (w_context - w_target)/sigma_target
+        l2_scaled = self.dot_layer([w_scaled, w_scaled])/(-2)
 
-        context_scaled_norm = self.dot_layer([w_context_scaled, w_context_scaled])/(-2)
-        target_context_scaled_dot = self.dot_layer([w_target_scaled, w_context_scaled])
-
-        pred = self.add_layer([target_context_scaled_dot, context_scaled_norm, b_target, b_context])
+        pred = self.add_layer([l2_scaled, b_target, b_context])
 
         return self.reshape_layer(pred)
+
+
+    def validate_metric_name(self, metric):
+        assert metric in ('l2', 'cos', 'fisher')
+
+    def validate_emb_mode(self, emb_mode):
+        assert emb_mode in ('distr', 'space', 'eval')
