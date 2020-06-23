@@ -359,7 +359,7 @@ def load_raw_data(corpus_name, job_dir, perl_cleanup = True, n_splits = None):
                 load_unpack_zip(corpus_name, job_dir, n_splits = n_splits)
         if perl_cleanup:
             if not os.path.exists('main_.pl'):
-                create_perl_cleanup_script(job_dir)
+                create_perl_cleanup_script('') # work in the cwd
             assert os.path.exists('main_.pl')
 
             text_file_paths = [text_file_path[:-4] + f'_sub{s}.txt' for s in range(n_splits)] if n_splits else [text_file_path]
@@ -402,13 +402,13 @@ def load_raw_data(corpus_name, job_dir, perl_cleanup = True, n_splits = None):
         if perl_cleanup:
             if not os.path.exists('main_.pl'):
                 create_perl_cleanup_script(job_dir)
-            assert os.path.exists('main_.pl')
+            assert os.path.exists(os.path.join(job_dir, 'main_.pl'))
 
             text_file_paths = [text_file_path[:-4] + f'_sub{s}.txt' for s in range(n_splits)] if n_splits else [text_file_path]
             for text_file_path in text_file_paths:
                 text_file_name = os.path.basename(text_file_path)
-                assert os.path.exists(os.path.join("model_data", text_file_name[:-4]))
-                bash_str = f'perl main_.pl {os.path.join("model_data", text_file_name[:-4])} > {os.path.join("model_data", text_file_name)}'
+                assert os.path.exists(os.path.join(job_dir, "model_data", text_file_name[:-4]))
+                bash_str = f'perl {os.path.join(job_dir, "main_.pl")} {os.path.join(job_dir, "model_data", text_file_name[:-4])} > {os.path.join(job_dir, "model_data", text_file_name)}'
                 print('Cleaning up the corpus...')
                 subprocess.run(bash_str, shell = True)
                 os.remove(os.path.join(text_file_path[:-4])) # remove temporary file. ## CHANGED HERE

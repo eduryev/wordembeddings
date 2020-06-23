@@ -1,7 +1,6 @@
 from setuptools import setup, find_packages
 
-setup(name='word2vec',
+setup(name='wordembeddings',
         packages=['newmodel'])
 
 print("Installed: ", find_packages())
-
