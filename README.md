@@ -40,7 +40,7 @@ To train your own model, simply compile all cells preceding "Training demos", an
 For instance, training a toy 200 dimensional Glove Model for 10 epochs should take about 15 minutes (including the time for the initial data processing). Real models can be trained in a couple of hours using larger datasets.
 
 
-#### Google Clud Platform integration
+#### Google Cloud Platform integration
 
 Word embedding models can be trained on Google Cloud Platform with different configurations of virtual machines. Some familiarity with GCP is required, in particular, understanding of control access.
 
@@ -74,7 +74,7 @@ Current version supports three model types. Each model is derived from `BaseMode
 2. HypGlove Model `--mode=hypglove` &mdash; extension of Glove Model with an additional dimension for each word embedding (motivated by how "generic" is an embedded word)
 
   Defined in `HypGloveModel` class in *newmodel.model*
-3. Word2Vec Model `--mode=word2vec` ([Tomas Mikolov et al. Distributetd Representations of Words and Phrases and Their Composability](https://papers.nips.cc/paper/5021-distributed-representations-of-words-and-phrases-and-their-compositionality.pdf))
+3. Word2Vec Model `--mode=word2vec` ([Tomas Mikolov et al. DistributeµÂtd Representations of Words and Phrases and Their Composability](https://papers.nips.cc/paper/5021-distributed-representations-of-words-and-phrases-and-their-compositionality.pdf))
 
   Defined in `Word2VecModel` class in *newmodel.model*
 
