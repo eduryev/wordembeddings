@@ -1,7 +1,7 @@
 # WordEmbeddings
 
 ## Introduction
-This is joint work with Eduard Duryev.
+This is joint work of Eduard Duryev and Efim Abrikosov.
 
 The goal of the project is to provide an efficient and easily accessible implementation of some classic word embeddings frameworks. In addition, we attempt to modify these frameworks and obtain new models driven by certain theoretical mathematical foundations.
 
